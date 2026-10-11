@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "canvas": {
+    "width": 900,
+    "height": 600,
+    "backgroundColor": "#ffffff"
+  },
+  "elements": [
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000001",
+      "type": "text",
+      "x": 300,
+      "y": 80,
+      "width": 300,
+      "height": 67,
+      "rotation": 0,
+      "zIndex": 1,
+      "text": "Judul Poster Saya",
+      "fontSize": 48,
+      "fontFamily": "Inter, sans-serif",
+      "fill": "#111111",
+      "align": "left"
+    },
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000002",
+      "type": "shape",
+      "shapeType": "rect",
+      "x": 200,
+      "y": 250,
+      "width": 200,
+      "height": 140,
+      "rotation": 15,
+      "zIndex": 2,
+      "fill": "#6366f1",
+      "stroke": "#312e81",
+      "strokeWidth": 2
+    },
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000003",
+      "type": "shape",
+      "shapeType": "circle",
+      "x": 550,
+      "y": 300,
+      "width": 160,
+      "height": 160,
+      "rotation": 0,
+      "zIndex": 3,
+      "fill": "#f97316",
+      "stroke": "#7c2d12",
+      "strokeWidth": 3
+    }
+  ]
+}

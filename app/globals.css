@@ -1,0 +1,265 @@
+:root {
+  --bg-app: #15171c;
+  --bg-panel: #1e2129;
+  --bg-panel-raised: #262a34;
+  --border: #343945;
+  --text-primary: #e7e9ee;
+  --text-muted: #9aa1af;
+  --accent: #5b8cff;
+  --accent-hover: #4574f2;
+  --danger: #e5484d;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: Inter, -apple-system, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+select {
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.editor-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.editor-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.editor-header h1 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.editor-header__subtitle {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.editor-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 220px 1fr 240px;
+  gap: 14px;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.editor-center {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+}
+
+.panel-section h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.panel-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.panel-buttons button,
+.action-panel button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 7px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.panel-buttons button:hover,
+.action-panel button:hover {
+  background: #2d3240;
+  border-color: var(--accent);
+}
+
+.shape-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.shape-icon--rect {
+  border-radius: 3px;
+}
+
+.shape-icon--circle {
+  border-radius: 50%;
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 6px 0 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.toolbar--empty {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.field input[type="number"],
+.field select {
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 5px 7px;
+  width: 96px;
+}
+
+.field input[type="color"] {
+  width: 40px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+}
+
+.field--layering {
+  margin-left: auto;
+}
+
+.segmented {
+  display: flex;
+  gap: 4px;
+}
+
+.segmented button {
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 5px 9px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.segmented button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0b0d12;
+  font-weight: 600;
+}
+
+.toolbar .danger {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  height: fit-content;
+}
+
+.toolbar .danger:hover {
+  background: rgba(229, 72, 77, 0.12);
+}
+
+.canvas-scroll {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: repeating-conic-gradient(#20232b 0% 25%, #1a1c22 0% 50%) 50% /
+    20px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: 24px;
+}
+
+.konva-stage {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+
+.canvas-loading {
+  color: var(--text-muted);
+  padding: 40px;
+}
+
+.action-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.action-panel .ghost {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+}
+
+.action-panel .ghost:hover {
+  border-color: var(--text-muted);
+  background: transparent;
+}
