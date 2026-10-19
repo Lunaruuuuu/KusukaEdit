@@ -16,6 +16,9 @@ export default function CanvasWorkspace() {
   const setSelectedId = useEditorStore((s) => s.setSelectedId);
   const removeSelected = useEditorStore((s) => s.removeSelected);
   const nudgeSelected = useEditorStore((s) => s.nudgeSelected);
+  const setStageNode = useEditorStore((s) => s.setStageNode);
+  const undo = useEditorStore((s) => s.undo);
+  const redo = useEditorStore((s) => s.redo);
 
   const stageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
@@ -25,6 +28,15 @@ export default function CanvasWorkspace() {
     if (node) nodesRef.current.set(id, node);
     else nodesRef.current.delete(id);
   };
+
+  // Hand the live Stage instance to the store once, on mount, so
+  // ActionPanel's "Export PNG/JPG" button can reach it without any prop
+  // drilling. Cleared again on unmount so nothing holds a dangling ref.
+  useEffect(() => {
+    setStageNode(stageRef.current);
+    return () => setStageNode(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Keep the Transformer bound to whichever node is currently selected.
   useEffect(() => {
@@ -42,8 +54,10 @@ export default function CanvasWorkspace() {
   }, [selectedId, elements]);
 
   // Keyboard shortcuts: Delete/Backspace removes the selection, arrow keys
-  // nudge it. Skip everything while the user is typing into a real input
-  // (e.g. a color/text field in the toolbar) so we don't hijack editing.
+  // nudge it, Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z (or Ctrl+Y) redoes. Skip
+  // all of this while the user is typing into a real input (e.g. a
+  // color/text field in the toolbar) so we don't hijack editing — the
+  // browser's own native undo should apply there instead.
   useEffect(() => {
     function isEditableTarget(target: EventTarget | null) {
       const el = target as HTMLElement | null;
@@ -54,6 +68,22 @@ export default function CanvasWorkspace() {
 
     function onKeyDown(e: KeyboardEvent) {
       if (isEditableTarget(e.target)) return;
+
+      const isUndoCombo = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey;
+      const isRedoCombo =
+        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && e.shiftKey) ||
+        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y");
+
+      if (isUndoCombo) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (isRedoCombo) {
+        e.preventDefault();
+        redo();
+        return;
+      }
 
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
@@ -68,7 +98,7 @@ export default function CanvasWorkspace() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [removeSelected, nudgeSelected]);
+  }, [removeSelected, nudgeSelected, undo, redo]);
 
   const sortedElements = [...elements].sort((a, b) => a.zIndex - b.zIndex);
 

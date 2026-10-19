@@ -32,6 +32,11 @@ select {
   font-size: 13px;
 }
 
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .editor-shell {
   display: flex;
   flex-direction: column;
@@ -40,7 +45,7 @@ select {
 
 .editor-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   padding: 14px 20px;
   border-bottom: 1px solid var(--border);
@@ -55,6 +60,28 @@ select {
 .editor-header__subtitle {
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.editor-header__spacer {
+  flex: 1;
+}
+
+.history-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.history-controls button {
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 7px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.history-controls button:not(:disabled):hover {
+  border-color: var(--accent);
 }
 
 .editor-body {
@@ -80,7 +107,8 @@ select {
   padding: 14px;
 }
 
-.side-panel {
+.side-panel,
+.action-panel {
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -95,6 +123,12 @@ select {
   font-weight: 600;
 }
 
+.panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .panel-buttons {
   display: flex;
   flex-direction: column;
@@ -102,7 +136,7 @@ select {
 }
 
 .panel-buttons button,
-.action-panel button {
+.action-panel > .panel-section > button {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -114,10 +148,11 @@ select {
   padding: 8px 10px;
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
+  width: 100%;
 }
 
-.panel-buttons button:hover,
-.action-panel button:hover {
+.panel-buttons button:not(:disabled):hover,
+.action-panel button:not(:disabled):hover {
   background: #2d3240;
   border-color: var(--accent);
 }
@@ -172,7 +207,7 @@ select {
   color: var(--text-primary);
   border-radius: 6px;
   padding: 5px 7px;
-  width: 96px;
+  width: 100%;
 }
 
 .field input[type="color"] {
@@ -244,13 +279,6 @@ select {
 .canvas-loading {
   color: var(--text-muted);
   padding: 40px;
-}
-
-.action-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  overflow-y: auto;
 }
 
 .action-panel .ghost {

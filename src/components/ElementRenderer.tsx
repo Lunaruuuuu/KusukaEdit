@@ -13,12 +13,7 @@ interface Props {
   registerNode: (id: string, node: Konva.Node | null) => void;
 }
 
-export default function ElementRenderer({
-  element,
-  isSelected,
-  onSelect,
-  registerNode,
-}: Props) {
+export default function ElementRenderer({ element, onSelect, registerNode }: Props) {
   const updateElement = useEditorStore((s) => s.updateElement);
 
   const commonProps = {

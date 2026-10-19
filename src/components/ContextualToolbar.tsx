@@ -38,9 +38,7 @@ export default function ContextualToolbar() {
             <input
               type="color"
               value={selected.fill}
-              onChange={(e) =>
-                updateElement(selected.id, { fill: e.target.value })
-              }
+              onChange={(e) => updateElement(selected.id, { fill: e.target.value })}
             />
           </label>
 
@@ -52,9 +50,7 @@ export default function ContextualToolbar() {
               max={200}
               value={selected.fontSize}
               onChange={(e) =>
-                updateElement(selected.id, {
-                  fontSize: Number(e.target.value) || 1,
-                })
+                updateElement(selected.id, { fontSize: Number(e.target.value) || 1 })
               }
             />
           </label>
@@ -63,9 +59,7 @@ export default function ContextualToolbar() {
             <span>Font</span>
             <select
               value={selected.fontFamily}
-              onChange={(e) =>
-                updateElement(selected.id, { fontFamily: e.target.value })
-              }
+              onChange={(e) => updateElement(selected.id, { fontFamily: e.target.value })}
             >
               {FONT_FAMILIES.map((f) => (
                 <option key={f} value={f}>
@@ -99,9 +93,7 @@ export default function ContextualToolbar() {
             <input
               type="color"
               value={selected.fill}
-              onChange={(e) =>
-                updateElement(selected.id, { fill: e.target.value })
-              }
+              onChange={(e) => updateElement(selected.id, { fill: e.target.value })}
             />
           </label>
 
@@ -110,9 +102,7 @@ export default function ContextualToolbar() {
             <input
               type="color"
               value={selected.stroke}
-              onChange={(e) =>
-                updateElement(selected.id, { stroke: e.target.value })
-              }
+              onChange={(e) => updateElement(selected.id, { stroke: e.target.value })}
             />
           </label>
 
@@ -124,9 +114,7 @@ export default function ContextualToolbar() {
               max={40}
               value={selected.strokeWidth}
               onChange={(e) =>
-                updateElement(selected.id, {
-                  strokeWidth: Number(e.target.value) || 0,
-                })
+                updateElement(selected.id, { strokeWidth: Number(e.target.value) || 0 })
               }
             />
           </label>
@@ -136,18 +124,10 @@ export default function ContextualToolbar() {
       <div className="field field--layering">
         <span>Layer (z-index: {selected.zIndex})</span>
         <div className="segmented">
-          <button onClick={() => reorderElement(selected.id, "back")}>
-            ⇤ Belakang
-          </button>
-          <button onClick={() => reorderElement(selected.id, "backward")}>
-            ← Turun
-          </button>
-          <button onClick={() => reorderElement(selected.id, "forward")}>
-            Naik →
-          </button>
-          <button onClick={() => reorderElement(selected.id, "front")}>
-            Depan ⇥
-          </button>
+          <button onClick={() => reorderElement(selected.id, "back")}>⇤ Belakang</button>
+          <button onClick={() => reorderElement(selected.id, "backward")}>← Turun</button>
+          <button onClick={() => reorderElement(selected.id, "forward")}>Naik →</button>
+          <button onClick={() => reorderElement(selected.id, "front")}>Depan ⇥</button>
         </div>
       </div>
 

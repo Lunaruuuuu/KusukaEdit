@@ -13,12 +13,8 @@ export default function SidePanel() {
         <h3>Text</h3>
         <div className="panel-buttons">
           <button onClick={() => addTextElement("title")}>+ Judul</button>
-          <button onClick={() => addTextElement("subtitle")}>
-            + Subjudul
-          </button>
-          <button onClick={() => addTextElement("paragraph")}>
-            + Paragraf
-          </button>
+          <button onClick={() => addTextElement("subtitle")}>+ Subjudul</button>
+          <button onClick={() => addTextElement("paragraph")}>+ Paragraf</button>
         </div>
       </div>
 

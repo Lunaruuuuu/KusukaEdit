@@ -1,0 +1,11 @@
+services:
+  canvas-editor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: canvas-design-editor:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped

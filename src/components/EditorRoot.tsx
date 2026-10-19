@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import SidePanel from "./SidePanel";
 import ContextualToolbar from "./ContextualToolbar";
 import ActionPanel from "./ActionPanel";
+import HistoryControls from "./HistoryControls";
 
 // react-konva touches `document`/`window` and draws on an HTML <canvas>,
 // none of which exist during Next.js's server render. Loading it with
@@ -20,6 +21,8 @@ export default function EditorRoot() {
       <header className="editor-header">
         <h1>Canvas Design Editor</h1>
         <span className="editor-header__subtitle">Polotno-style prototype</span>
+        <div className="editor-header__spacer" />
+        <HistoryControls />
       </header>
 
       <div className="editor-body">
