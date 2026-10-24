@@ -3,6 +3,12 @@
 import React, { useRef, useState } from "react";
 import { useEditorStore } from "@/store/useEditorStore";
 import { exportStageAsImage, type ImageFormat } from "@/lib/exportImage";
+import type { ExportFormat } from "@/lib/polotnoAdapter";
+
+const FORMAT_LABEL: Record<ExportFormat, string> = {
+  kusuka: "KusukaEdit",
+  polotno: "Polotno",
+};
 
 export default function ActionPanel() {
   const exportToJSON = useEditorStore((s) => s.exportToJSON);
@@ -12,21 +18,24 @@ export default function ActionPanel() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [jsonFormat, setJsonFormat] = useState<ExportFormat>("kusuka");
   const [imageFormat, setImageFormat] = useState<ImageFormat>("png");
   const [resolution, setResolution] = useState(2);
 
   function handleExportJSON() {
-    const json = exportToJSON();
+    const json = exportToJSON(jsonFormat);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `canvas-design-${Date.now()}.json`;
+    a.download = `${jsonFormat === "polotno" ? "polotno" : "kusuka"}-design-${Date.now()}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    setMessage("JSON berhasil diunduh.");
+    setWarnings([]);
+    setMessage(`JSON format ${FORMAT_LABEL[jsonFormat]} berhasil diunduh.`);
   }
 
   function handleExportImage() {
@@ -35,9 +44,8 @@ export default function ActionPanel() {
       return;
     }
     exportStageAsImage(stageNode, { format: imageFormat, pixelRatio: resolution });
-    setMessage(
-      `Gambar ${imageFormat.toUpperCase()} (${resolution}x) berhasil diunduh.`
-    );
+    setWarnings([]);
+    setMessage(`Gambar ${imageFormat.toUpperCase()} (${resolution}x) berhasil diunduh.`);
   }
 
   function handleImportClick() {
@@ -50,11 +58,15 @@ export default function ActionPanel() {
 
     const reader = new FileReader();
     reader.onload = () => {
-      const text = reader.result as string;
-      const result = loadFromJSON(text);
-      setMessage(
-        result.ok ? "Desain berhasil diimpor dari JSON." : `Gagal impor: ${result.error}`
-      );
+      // The format (KusukaEdit or Polotno) is detected from the content, not the file name.
+      const result = loadFromJSON(reader.result as string);
+      if (result.ok) {
+        setMessage(`Desain berhasil diimpor (terdeteksi format ${FORMAT_LABEL[result.format]}).`);
+        setWarnings(result.warnings);
+      } else {
+        setMessage(`Gagal impor: ${result.error}`);
+        setWarnings([]);
+      }
     };
     reader.readAsText(file);
 
@@ -66,10 +78,27 @@ export default function ActionPanel() {
     <div className="panel action-panel">
       <div className="panel-section">
         <h3>Data (JSON)</h3>
+        <div className="field">
+          <span>Format unduhan</span>
+          <div className="segmented segmented--stretch">
+            {(["kusuka", "polotno"] as ExportFormat[]).map((f) => (
+              <button
+                key={f}
+                className={jsonFormat === f ? "active" : ""}
+                onClick={() => setJsonFormat(f)}
+                aria-pressed={jsonFormat === f}
+                title={f === "kusuka" ? "Format bawaan KusukaEdit" : "Kompatibel dengan Polotno"}
+              >
+                {f === "kusuka" ? "Native" : "Polotno"}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="panel-buttons">
-          <button onClick={handleExportJSON}>⬇ Export JSON</button>
+          <button onClick={handleExportJSON}>⬇ Export JSON ({FORMAT_LABEL[jsonFormat]})</button>
           <button onClick={handleImportClick}>⬆ Import JSON</button>
         </div>
+        <p className="hint hint--tight">Import mengenali format KusukaEdit dan Polotno otomatis.</p>
         <input
           ref={fileInputRef}
           type="file"
@@ -83,10 +112,7 @@ export default function ActionPanel() {
         <h3>Gambar (PNG/JPG)</h3>
         <label className="field">
           <span>Format</span>
-          <select
-            value={imageFormat}
-            onChange={(e) => setImageFormat(e.target.value as ImageFormat)}
-          >
+          <select value={imageFormat} onChange={(e) => setImageFormat(e.target.value as ImageFormat)}>
             <option value="png">PNG (transparan-ready)</option>
             <option value="jpeg">JPG</option>
           </select>
@@ -113,6 +139,13 @@ export default function ActionPanel() {
       </div>
 
       {message && <p className="hint">{message}</p>}
+      {warnings.length > 0 && (
+        <ul className="warning-list">
+          {warnings.map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import React from "react";
 import { useEditorStore } from "@/store/useEditorStore";
 import { TextAlign } from "@/types/editor";
+import { toInputColor } from "@/lib/color";
 
 const FONT_FAMILIES = [
   "Inter, sans-serif",
@@ -37,7 +38,7 @@ export default function ContextualToolbar() {
             <span>Warna</span>
             <input
               type="color"
-              value={selected.fill}
+              value={toInputColor(selected.fill)}
               onChange={(e) => updateElement(selected.id, { fill: e.target.value })}
             />
           </label>
@@ -92,7 +93,7 @@ export default function ContextualToolbar() {
             <span>Warna Isi</span>
             <input
               type="color"
-              value={selected.fill}
+              value={toInputColor(selected.fill)}
               onChange={(e) => updateElement(selected.id, { fill: e.target.value })}
             />
           </label>
@@ -101,7 +102,7 @@ export default function ContextualToolbar() {
             <span>Warna Garis</span>
             <input
               type="color"
-              value={selected.stroke}
+              value={toInputColor(selected.stroke)}
               onChange={(e) => updateElement(selected.id, { stroke: e.target.value })}
             />
           </label>

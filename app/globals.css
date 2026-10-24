@@ -291,3 +291,163 @@ button:disabled {
   border-color: var(--text-muted);
   background: transparent;
 }
+
+/* ======================================================================
+   Keyboard focus (visible for keyboard users, not on mouse click)
+   ====================================================================== */
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ======================================================================
+   Stage wrapper + in-place text editor
+   The wrapper is exactly the size of the Konva Stage and is the
+   positioning context for the <textarea> overlay, so stage coordinates
+   equal CSS pixels inside it. `flex: none` stops the flex container
+   (.canvas-scroll) from shrinking it when the viewport is narrower than
+   the canvas — a shrunk wrapper would drift away from the Stage.
+   ====================================================================== */
+.stage-wrap {
+  position: relative;
+  flex: none;
+}
+
+.text-editor {
+  position: absolute;
+  z-index: 5;
+  /* Konva rotates a node around its top-left corner; CSS defaults to the
+     centre, which would swing the textarea away from the text. */
+  transform-origin: 0 0;
+}
+
+.text-editor__input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  /* Transparent so the canvas background and neighbouring elements stay
+     visible while editing. */
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  /* `outline` (not `border`) so the frame adds no size and the text does
+     not shift by even a pixel versus the Konva node it replaces. */
+  outline: 1px dashed var(--accent);
+  outline-offset: 3px;
+}
+
+.text-editor__hint {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 10px;
+  padding: 3px 7px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  pointer-events: none;
+}
+
+/* ======================================================================
+   Side panel tabs, import warnings
+   ====================================================================== */
+.segmented--stretch {
+  width: 100%;
+}
+
+.segmented--stretch button {
+  flex: 1;
+}
+
+.hint--tight {
+  margin: 0;
+}
+
+.warning-list {
+  margin: 0;
+  padding: 8px 10px 8px 26px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #f0c674;
+  background: rgba(240, 198, 116, 0.08);
+  border: 1px solid rgba(240, 198, 116, 0.3);
+  border-radius: 7px;
+}
+
+/* ======================================================================
+   Template gallery
+   ====================================================================== */
+.template-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.template-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.template-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  text-align: left;
+  color: var(--text-primary);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.template-card:hover {
+  border-color: var(--accent);
+  background: #2d3240;
+}
+
+/* Fixed 3:2 frame; the SVG inside keeps its own aspect ratio (letterboxed),
+   so square and landscape templates line up in one grid. */
+.template-card__thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+  background: #0d0f13;
+  border-radius: 4px;
+}
+
+.template-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.template-card__name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.template-card__badge {
+  padding: 1px 7px;
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}

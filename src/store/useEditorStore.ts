@@ -1,20 +1,23 @@
 import { create } from "zustand";
-import { v4 as uuidv4 } from "uuid";
 import type Konva from "konva";
 import {
-  CanvasDocument,
-  CanvasElement,
-  CanvasMeta,
-  ShapeKind,
-  TextElement,
-  ShapeElement,
+  DEFAULT_CANVAS,
+  DEFAULT_FONT_FAMILY,
+  SCHEMA_VERSION,
+  type CanvasDocument,
+  type CanvasElement,
+  type CanvasMeta,
+  type ShapeElement,
+  type ShapeKind,
+  type TextElement,
 } from "@/types/editor";
-
-const DEFAULT_CANVAS: CanvasMeta = {
-  width: 900,
-  height: 600,
-  backgroundColor: "#ffffff",
-};
+import { newId } from "@/lib/id";
+import {
+  convertKusukaToPolotno,
+  parseDocument,
+  type ExportFormat,
+  type LoadResult,
+} from "@/lib/polotnoAdapter";
 
 type ReorderDirection = "front" | "back" | "forward" | "backward";
 
@@ -23,8 +26,8 @@ type ReorderDirection = "front" | "back" | "forward" | "backward";
 // ---------------------------------------------------------------------------
 // A snapshot only ever captures the two pieces of state that make up the
 // *document* (canvas meta + elements) — never `selectedId` (selection isn't
-// something a user expects "Undo" to restore) and never `stageNode` (a
-// Konva.Stage instance isn't data, so it can't be part of history).
+// something a user expects "Undo" to restore), never `clipboard`, never
+// `editingId` and never `stageNode` (a Konva.Stage instance isn't data).
 interface HistorySnapshot {
   canvas: CanvasMeta;
   elements: CanvasElement[];
@@ -36,6 +39,9 @@ const MAX_HISTORY = 50;
 // one "hold the arrow key" repeat without feeling laggy when the user
 // deliberately presses Undo right after finishing an edit.
 const HISTORY_DEBOUNCE_MS = 500;
+
+// Where a pasted element lands relative to the one it was copied from.
+const PASTE_OFFSET = 20;
 
 function cloneSnapshot(canvas: CanvasMeta, elements: CanvasElement[]): HistorySnapshot {
   // Structural clone, not a reference copy — otherwise a later in-place
@@ -51,6 +57,17 @@ interface EditorState {
   canvas: CanvasMeta;
   elements: CanvasElement[];
   selectedId: string | null;
+
+  // Element copied with Ctrl+C, waiting for Ctrl+V. Not part of the document
+  // and never touched by undo/redo.
+  clipboard: CanvasElement | null;
+  copySelected: () => boolean;
+  pasteClipboard: () => boolean;
+
+  // Id of the text element currently being edited in the <textarea> overlay.
+  // While set, global keyboard shortcuts are suspended and the Konva node is hidden.
+  editingId: string | null;
+  setEditingId: (id: string | null) => void;
 
   // the live Konva.Stage instance, registered by CanvasWorkspace once it
   // mounts. Not part of the document and never touched by undo/redo — it
@@ -74,14 +91,16 @@ interface EditorState {
   addTextElement: (preset?: "title" | "subtitle" | "paragraph") => void;
   addShapeElement: (shapeType: ShapeKind) => void;
   updateElement: (id: string, attrs: Partial<CanvasElement>) => void;
+  /** Layout-derived height of an auto-height text node. Never creates an undo step. */
+  syncMeasuredHeight: (id: string, height: number) => void;
   removeElement: (id: string) => void;
   removeSelected: () => void;
   reorderElement: (id: string, direction: ReorderDirection) => void;
   nudgeSelected: (dx: number, dy: number) => void;
 
   // serialization
-  exportToJSON: () => string;
-  loadFromJSON: (jsonString: string) => { ok: boolean; error?: string };
+  exportToJSON: (format?: ExportFormat) => string;
+  loadFromJSON: (jsonData: string | unknown) => LoadResult;
   reset: () => void;
 }
 
@@ -89,15 +108,13 @@ function nextZIndex(elements: CanvasElement[]): number {
   return elements.length === 0 ? 1 : Math.max(...elements.map((e) => e.zIndex)) + 1;
 }
 
-const TEXT_PRESETS: Record<"title" | "subtitle" | "paragraph", Partial<TextElement>> = {
-  title: { text: "Add a title", fontSize: 48, fontFamily: "Inter, sans-serif" },
-  subtitle: { text: "Add a subtitle", fontSize: 28, fontFamily: "Inter, sans-serif" },
-  paragraph: {
-    text: "Add a bit of body text here. Double click to edit.",
-    fontSize: 16,
-    fontFamily: "Inter, sans-serif",
-  },
+const TEXT_PRESETS: Record<"title" | "subtitle" | "paragraph", { text: string; fontSize: number }> = {
+  title: { text: "Add a title", fontSize: 48 },
+  subtitle: { text: "Add a subtitle", fontSize: 28 },
+  paragraph: { text: "Add a bit of body text here. Double click to edit.", fontSize: 16 },
 };
+
+const NEW_TEXT_LINE_HEIGHT = 1.2;
 
 export const useEditorStore = create<EditorState>((set, get) => {
   // -------------------------------------------------------------------
@@ -138,7 +155,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     }
   }
 
-  /** Call BEFORE a one-shot, discrete change (add/remove/reorder/...). */
+  /** Call BEFORE a one-shot, discrete change (add/remove/reorder/paste/...). */
   function recordHistoryNow() {
     // Flush first so this discrete step never gets merged into an
     // unrelated in-flight drag/typing burst.
@@ -175,11 +192,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
     canvas: { ...DEFAULT_CANVAS },
     elements: [],
     selectedId: null,
+    clipboard: null,
+    editingId: null,
     stageNode: null,
     past: [],
     future: [],
 
     setStageNode: (stage) => set({ stageNode: stage }),
+    setEditingId: (id) => set({ editingId: id }),
 
     undo: () => {
       // Finish sealing whatever burst is in flight first, so the stacks
@@ -195,6 +215,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         canvas: previous.canvas,
         elements: previous.elements,
         selectedId: null,
+        editingId: null,
       });
     },
 
@@ -210,6 +231,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         canvas: next.canvas,
         elements: next.elements,
         selectedId: null,
+        editingId: null,
       });
     },
 
@@ -227,19 +249,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const { elements, canvas } = get();
       const p = TEXT_PRESETS[preset];
       const el: TextElement = {
-        id: uuidv4(),
+        id: newId(),
         type: "text",
         x: canvas.width / 2 - 150,
         y: canvas.height / 2 - 20,
         width: 300,
-        height: (p.fontSize ?? 16) * 1.4,
+        height: p.fontSize * NEW_TEXT_LINE_HEIGHT, // re-measured by the renderer once drawn
         rotation: 0,
         zIndex: nextZIndex(elements),
-        text: p.text ?? "Text",
-        fontSize: p.fontSize ?? 16,
-        fontFamily: p.fontFamily ?? "Inter, sans-serif",
+        text: p.text,
+        fontSize: p.fontSize,
+        fontFamily: DEFAULT_FONT_FAMILY,
         fill: "#111111",
         align: "left",
+        fontStyle: "normal",
+        lineHeight: NEW_TEXT_LINE_HEIGHT,
       };
       set((state) => ({ elements: [...state.elements, el], selectedId: el.id }));
     },
@@ -249,11 +273,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const { elements, canvas } = get();
       const size = shapeType === "circle" ? 160 : 200;
       const el: ShapeElement = {
-        id: uuidv4(),
+        id: newId(),
         type: "shape",
         shapeType,
+        // top-left corner, like every other element
         x: canvas.width / 2 - size / 2,
-        y: canvas.height / 2 - size / 2,
+        y: canvas.height / 2 - (shapeType === "rect" ? size * 0.7 : size) / 2,
         width: size,
         height: shapeType === "rect" ? size * 0.7 : size,
         rotation: 0,
@@ -261,6 +286,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         fill: "#6366f1",
         stroke: "#312e81",
         strokeWidth: 2,
+        cornerRadius: shapeType === "rect" ? 4 : 0,
       };
       set((state) => ({ elements: [...state.elements, el], selectedId: el.id }));
     },
@@ -278,17 +304,65 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }));
     },
 
+    // Text height is derived from the text, width and font (Konva measures
+    // it), so this is bookkeeping for the JSON — not a user edit — and must
+    // not show up as an undo step. Returning `state` unchanged is a no-op.
+    syncMeasuredHeight: (id, height) =>
+      set((state) => {
+        const el = state.elements.find((e) => e.id === id);
+        if (!el || Math.abs(el.height - height) < 0.5) return state;
+        return {
+          elements: state.elements.map((e) => (e.id === id ? { ...e, height } : e)),
+        };
+      }),
+
     removeElement: (id) => {
       recordHistoryNow();
       set((state) => ({
         elements: state.elements.filter((el) => el.id !== id),
         selectedId: state.selectedId === id ? null : state.selectedId,
+        editingId: state.editingId === id ? null : state.editingId,
       }));
     },
 
     removeSelected: () => {
       const { selectedId, removeElement } = get();
       if (selectedId) removeElement(selectedId);
+    },
+
+    // -------------------------------------------------------------------
+    // Copy / paste (Ctrl+C / Ctrl+V)
+    // -------------------------------------------------------------------
+    copySelected: () => {
+      const { selectedId, elements } = get();
+      const el = elements.find((e) => e.id === selectedId);
+      if (!el) return false;
+      set({ clipboard: { ...el } });
+      return true;
+    },
+
+    pasteClipboard: () => {
+      const { clipboard, elements } = get();
+      if (!clipboard) return false;
+
+      recordHistoryNow();
+      const copy = {
+        ...clipboard,
+        id: newId(),
+        x: clipboard.x + PASTE_OFFSET,
+        y: clipboard.y + PASTE_OFFSET,
+        zIndex: nextZIndex(elements),
+      } as CanvasElement;
+
+      set((state) => ({
+        elements: [...state.elements, copy],
+        selectedId: copy.id,
+        // The clipboard now remembers the pasted position, so pressing
+        // Ctrl+V repeatedly cascades (+20, +40, +60 ...) instead of
+        // stacking every copy on the same spot.
+        clipboard: { ...copy },
+      }));
+      return true;
     },
 
     reorderElement: (id, direction) => {
@@ -349,46 +423,37 @@ export const useEditorStore = create<EditorState>((set, get) => {
     // -------------------------------------------------------------------
     // JSON serialization
     // -------------------------------------------------------------------
-    exportToJSON: () => {
+    exportToJSON: (format = "kusuka") => {
       const { canvas, elements } = get();
-      const doc: CanvasDocument = { version: 1, canvas, elements };
-      return JSON.stringify(doc, null, 2);
+      const doc: CanvasDocument = { version: SCHEMA_VERSION, canvas, elements };
+      const out = format === "polotno" ? convertKusukaToPolotno(doc) : doc;
+      return JSON.stringify(out, null, 2);
     },
 
-    loadFromJSON: (jsonString) => {
-      try {
-        const parsed = JSON.parse(jsonString) as Partial<CanvasDocument>;
+    // The one entry point for replacing the canvas: the Import button and
+    // the template gallery both call this. Input may be a JSON string or an
+    // already-parsed object, in native OR Polotno format — parseDocument()
+    // detects which and maps it to the native schema deterministically.
+    loadFromJSON: (jsonData) => {
+      const parsed = parseDocument(jsonData);
+      if (!parsed.ok) return parsed;
 
-        if (!parsed || typeof parsed !== "object") {
-          return { ok: false, error: "File is not a valid JSON object." };
-        }
-        if (!parsed.canvas || !Array.isArray(parsed.elements)) {
-          return { ok: false, error: "JSON is missing required `canvas` or `elements` fields." };
-        }
-
-        // Importing a whole new document is still a single, discrete,
-        // undoable step -- so the design right before the import stays
-        // one Ctrl+Z away.
-        recordHistoryNow();
-
-        set({
-          canvas: {
-            width: parsed.canvas.width ?? DEFAULT_CANVAS.width,
-            height: parsed.canvas.height ?? DEFAULT_CANVAS.height,
-            backgroundColor: parsed.canvas.backgroundColor ?? DEFAULT_CANVAS.backgroundColor,
-          },
-          elements: parsed.elements as CanvasElement[],
-          selectedId: null,
-        });
-        return { ok: true };
-      } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : "Failed to parse JSON." };
-      }
+      // Importing a whole new document is still a single, discrete,
+      // undoable step -- so the design right before the import stays
+      // one Ctrl+Z away.
+      recordHistoryNow();
+      set({
+        canvas: parsed.document.canvas,
+        elements: parsed.document.elements,
+        selectedId: null,
+        editingId: null,
+      });
+      return { ok: true, format: parsed.format, warnings: parsed.warnings };
     },
 
     reset: () => {
       recordHistoryNow();
-      set({ canvas: { ...DEFAULT_CANVAS }, elements: [], selectedId: null });
+      set({ canvas: { ...DEFAULT_CANVAS }, elements: [], selectedId: null, editingId: null });
     },
   };
 });
