@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "incremental": false,
+    "plugins": [],
+    "paths": {
+      "@/*": ["src/*"],
+      "zustand": ["tests/stubs/zustand.ts"],
+      "uuid": ["tests/stubs/uuid.ts"]
+    }
+  },
+  "include": ["./**/*.ts", "../src/**/*.ts"],
+  "exclude": ["../node_modules"]
+}

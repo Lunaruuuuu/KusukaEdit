@@ -73,7 +73,39 @@ export function parseColor(value: unknown): string | null {
     return "#" + toHex2(parseFloat(rgb[1])) + toHex2(parseFloat(rgb[2])) + toHex2(parseFloat(rgb[3]));
   }
 
+  // hsl(210, 50%, 40%) / hsla(210, 50%, 40%, 0.8)
+  const hsl = v.match(
+    /^hsla?\(\s*(-?\d+(?:\.\d+)?)(?:deg)?\s*,\s*(\d+(?:\.\d+)?)%\s*,\s*(\d+(?:\.\d+)?)%\s*(?:,\s*(\d*\.?\d+)\s*)?\)$/
+  );
+  if (hsl) {
+    const alpha = hsl[4] === undefined ? 1 : parseFloat(hsl[4]);
+    if (alpha === 0) return "transparent";
+    const h = (((parseFloat(hsl[1]) % 360) + 360) % 360) / 360;
+    const s = Math.min(100, parseFloat(hsl[2])) / 100;
+    const l = Math.min(100, parseFloat(hsl[3])) / 100;
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    const channel = (t: number) => {
+      const x = (t + 1) % 1;
+      if (x < 1 / 6) return p + (q - p) * 6 * x;
+      if (x < 1 / 2) return q;
+      if (x < 2 / 3) return p + (q - p) * (2 / 3 - x) * 6;
+      return p;
+    };
+    return (
+      "#" +
+      toHex2(channel(h + 1 / 3) * 255) +
+      toHex2(channel(h) * 255) +
+      toHex2(channel(h - 1 / 3) * 255)
+    );
+  }
+
   return NAMED_COLORS[v] ?? null;
+}
+
+/** True when a file actually specified a color (so an unparsable one is worth a warning). */
+export function isColorSpecified(value: unknown): boolean {
+  return typeof value === "string" && value.trim() !== "";
 }
 
 export function normalizeColor(value: unknown, fallback: string): string {

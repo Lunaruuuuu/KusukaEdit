@@ -7,6 +7,7 @@ import {
   type CanvasDocument,
   type CanvasElement,
   type CanvasMeta,
+  type ImageElement,
   type ShapeElement,
   type ShapeKind,
   type TextElement,
@@ -18,6 +19,30 @@ import {
   type ExportFormat,
   type LoadResult,
 } from "@/lib/polotnoAdapter";
+import { normalizeColor } from "@/lib/color";
+import { clampDimension, fitImageToCanvas } from "@/lib/workspace";
+import {
+  hasTrackedObjectUrls,
+  releaseUnreferencedObjectUrls,
+  trackObjectUrl,
+} from "@/lib/objectUrls";
+import { evictImage } from "@/lib/imageCache";
+import { embedObjectUrls } from "@/lib/imageData";
+
+/** A picture that has been loaded and measured, ready to become an element. */
+export interface ImageSource {
+  src: string;
+  naturalWidth: number;
+  naturalHeight: number;
+  /** True when the file is an SVG (a vector picture, e.g. an icon). */
+  vector?: boolean;
+}
+
+/** What exportToJSON() produces: the file content plus anything worth telling the user. */
+export interface ExportResult {
+  json: string;
+  warnings: string[];
+}
 
 type ReorderDirection = "front" | "back" | "forward" | "backward";
 
@@ -75,13 +100,20 @@ interface EditorState {
   stageNode: Konva.Stage | null;
   setStageNode: (stage: Konva.Stage | null) => void;
 
+  // Counts the documents loaded with loadFromJSON() (Import button, template
+  // gallery). A VIEW signal, not document state: the canvas watches it to show
+  // a freshly loaded design whole again (zoom "Fit"), even when the new
+  // document happens to have the same size as the old one. Never in history.
+  loadRevision: number;
+
   // history stacks (exposed read-only; mutate only through undo/redo below)
   past: HistorySnapshot[];
   future: HistorySnapshot[];
   undo: () => void;
   redo: () => void;
 
-  // canvas meta
+  // canvas meta (size is clamped to CANVAS_LIMITS; repeated calls, e.g. a
+  // dragged color picker, collapse into one undo step)
   setCanvasMeta: (meta: Partial<CanvasMeta>) => void;
 
   // selection
@@ -90,6 +122,10 @@ interface EditorState {
   // element CRUD
   addTextElement: (preset?: "title" | "subtitle" | "paragraph") => void;
   addShapeElement: (shapeType: ShapeKind) => void;
+  /** Places an uploaded picture, centred and fitted inside the canvas. */
+  addImageElement: (image: ImageSource) => void;
+  /** Swaps the picture of an image element, keeping its position and width. */
+  replaceImageSource: (id: string, image: ImageSource) => void;
   updateElement: (id: string, attrs: Partial<CanvasElement>) => void;
   /** Layout-derived height of an auto-height text node. Never creates an undo step. */
   syncMeasuredHeight: (id: string, height: number) => void;
@@ -98,8 +134,9 @@ interface EditorState {
   reorderElement: (id: string, direction: ReorderDirection) => void;
   nudgeSelected: (dx: number, dy: number) => void;
 
-  // serialization
-  exportToJSON: (format?: ExportFormat) => string;
+  // serialization. Async because uploaded pictures (temporary blob: URLs) are
+  // read back and embedded as data: URLs so the file works after a refresh.
+  exportToJSON: (format?: ExportFormat) => Promise<ExportResult>;
   loadFromJSON: (jsonData: string | unknown) => LoadResult;
   reset: () => void;
 }
@@ -139,6 +176,35 @@ export const useEditorStore = create<EditorState>((set, get) => {
   let pendingBatchKey: string | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // -------------------------------------------------------------------
+  // Object-URL lifetime (see lib/objectUrls.ts for the full reasoning).
+  //
+  // A picture's blob: URL must outlive the element that shows it, because
+  // Undo can bring that element back. So it is revoked only when NOTHING that
+  // could still draw it refers to it: not the current elements, not any
+  // undo/redo snapshot, not the batch snapshot still waiting to be sealed,
+  // and not the clipboard. Deleting or replacing a picture therefore frees
+  // its memory as soon as it is gone for good — i.e. when it falls out of the
+  // history — never earlier.
+  //
+  // Called after every change that can drop a reference.
+  // -------------------------------------------------------------------
+  function releaseOrphanUrls() {
+    if (!hasTrackedObjectUrls()) return; // nothing was ever uploaded: free
+    const { elements, past, future, clipboard } = get();
+    const referenced = new Set<string>();
+    const collect = (list: CanvasElement[]) => {
+      for (const el of list) if (el.type === "image") referenced.add(el.src);
+    };
+    collect(elements);
+    past.forEach((snap) => collect(snap.elements));
+    future.forEach((snap) => collect(snap.elements));
+    if (pendingSnapshot) collect(pendingSnapshot.elements);
+    if (clipboard && clipboard.type === "image") referenced.add(clipboard.src);
+
+    releaseUnreferencedObjectUrls(referenced).forEach(evictImage);
+  }
+
   function sealPendingSnapshot() {
     if (debounceTimer) {
       clearTimeout(debounceTimer);
@@ -152,6 +218,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         past: [...state.past, snap].slice(-MAX_HISTORY),
         future: [], // a new branch of edits invalidates any old "redo" line
       }));
+      releaseOrphanUrls(); // the trim / cleared redo line may have dropped the last reference
     }
   }
 
@@ -166,6 +233,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       past: [...state.past, snap].slice(-MAX_HISTORY),
       future: [],
     }));
+    releaseOrphanUrls();
   }
 
   /**
@@ -195,6 +263,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     clipboard: null,
     editingId: null,
     stageNode: null,
+    loadRevision: 0,
     past: [],
     future: [],
 
@@ -217,6 +286,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         selectedId: null,
         editingId: null,
       });
+      releaseOrphanUrls(); // `future` is capped, so a snapshot may have just fallen off
     },
 
     redo: () => {
@@ -233,11 +303,38 @@ export const useEditorStore = create<EditorState>((set, get) => {
         selectedId: null,
         editingId: null,
       });
+      releaseOrphanUrls();
     },
 
+    // Workspace size / background. Whatever the caller passes is made safe
+    // here, so no UI can put the canvas into a state Konva cannot draw:
+    // sizes are whole pixels within CANVAS_LIMITS, NaN/Infinity are ignored,
+    // and the color is normalized to #rrggbb (or "transparent").
+    //
+    // Goes through the debounced history path (batch key "canvas"): typing a
+    // size or dragging the color picker produces one undo step, not dozens.
+    // The Stage, the background rect and stage.toDataURL() all read this
+    // object, so a change here is immediately the new working area AND the
+    // new export size.
     setCanvasMeta: (meta) => {
-      recordHistoryNow();
-      set((state) => ({ canvas: { ...state.canvas, ...meta } }));
+      const current = get().canvas;
+      const next: CanvasMeta = {
+        width: meta.width === undefined ? current.width : clampDimension(meta.width, current.width),
+        height: meta.height === undefined ? current.height : clampDimension(meta.height, current.height),
+        backgroundColor:
+          meta.backgroundColor === undefined
+            ? current.backgroundColor
+            : normalizeColor(meta.backgroundColor, current.backgroundColor),
+      };
+      if (
+        next.width === current.width &&
+        next.height === current.height &&
+        next.backgroundColor === current.backgroundColor
+      ) {
+        return; // nothing changed: no undo step
+      }
+      recordHistoryDebounced("canvas");
+      set({ canvas: next });
     },
 
     // Selection is deliberately NOT recorded in history — undo should
@@ -291,6 +388,64 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set((state) => ({ elements: [...state.elements, el], selectedId: el.id }));
     },
 
+    addImageElement: ({ src, naturalWidth, naturalHeight, vector }) => {
+      recordHistoryNow();
+      trackObjectUrl(src); // from now on this store is responsible for revoking it
+      const { elements, canvas } = get();
+      const size = fitImageToCanvas(naturalWidth, naturalHeight, canvas);
+      const el: ImageElement = {
+        id: newId(),
+        type: "image",
+        // top-left corner, like every other element; centred on the canvas
+        x: (canvas.width - size.width) / 2,
+        y: (canvas.height - size.height) / 2,
+        width: size.width,
+        height: size.height,
+        rotation: 0,
+        zIndex: nextZIndex(elements),
+        src,
+        cropX: 0,
+        cropY: 0,
+        cropWidth: 1,
+        cropHeight: 1,
+        scaleX: 1,
+        scaleY: 1,
+        ...(vector ? { vector: true } : {}),
+      };
+      set((state) => ({ elements: [...state.elements, el], selectedId: el.id }));
+    },
+
+    replaceImageSource: (id, { src, naturalWidth, naturalHeight, vector }) => {
+      const target = get().elements.find((e) => e.id === id);
+      if (!target || target.type !== "image") return;
+      recordHistoryNow();
+      trackObjectUrl(src);
+      // Same position and width; the height follows the new picture's aspect
+      // ratio so it is not stretched. The old crop belonged to the old picture.
+      const aspect = naturalWidth > 0 && naturalHeight > 0 ? naturalHeight / naturalWidth : target.height / target.width;
+      set((state) => ({
+        elements: state.elements.map((e) => {
+          if (e.id !== id || e.type !== "image") return e;
+          // Position, width and mirroring are the user's; whether the new file
+          // is a vector picture is the new file's.
+          const { vector: _previous, ...rest } = e;
+          return {
+            ...rest,
+            src,
+            height: Math.round(e.width * aspect * 100) / 100,
+            cropX: 0,
+            cropY: 0,
+            cropWidth: 1,
+            cropHeight: 1,
+            ...(vector ? { vector: true } : {}),
+          };
+        }),
+      }));
+      // The old picture is still in the history snapshot just recorded, so
+      // Undo works; its URL is revoked once that snapshot is gone.
+      releaseOrphanUrls();
+    },
+
     // Used for drag/resize/rotate (one call per gesture) AND for toolbar
     // inputs that fire on every keystroke/slide (many calls per gesture).
     // Either way it's a "continuous" edit, so it goes through the
@@ -323,6 +478,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
         selectedId: state.selectedId === id ? null : state.selectedId,
         editingId: state.editingId === id ? null : state.editingId,
       }));
+      // A deleted picture is still in the history snapshot just recorded, so
+      // this normally revokes nothing yet — see releaseOrphanUrls().
+      releaseOrphanUrls();
     },
 
     removeSelected: () => {
@@ -338,6 +496,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const el = elements.find((e) => e.id === selectedId);
       if (!el) return false;
       set({ clipboard: { ...el } });
+      releaseOrphanUrls(); // the previous clipboard content no longer holds its picture
       return true;
     },
 
@@ -362,6 +521,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
         // stacking every copy on the same spot.
         clipboard: { ...copy },
       }));
+      // A pasted picture shares its URL with the original; both elements
+      // keep it alive, and deleting one never revokes it under the other.
+      releaseOrphanUrls();
       return true;
     },
 
@@ -423,11 +585,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
     // -------------------------------------------------------------------
     // JSON serialization
     // -------------------------------------------------------------------
-    exportToJSON: (format = "kusuka") => {
+    exportToJSON: async (format = "kusuka") => {
+      // Snapshot the document first; the user may keep editing while the
+      // pictures are being read, and the file must reflect ONE moment.
       const { canvas, elements } = get();
       const doc: CanvasDocument = { version: SCHEMA_VERSION, canvas, elements };
-      const out = format === "polotno" ? convertKusukaToPolotno(doc) : doc;
-      return JSON.stringify(out, null, 2);
+
+      // blob: URLs die with the page, so uploaded pictures are embedded as
+      // data: URLs in the exported copy (the live elements are untouched).
+      const { document: portable, warnings } = await embedObjectUrls(doc);
+      const out = format === "polotno" ? convertKusukaToPolotno(portable) : portable;
+      return { json: JSON.stringify(out, null, 2), warnings };
     },
 
     // The one entry point for replacing the canvas: the Import button and
@@ -447,13 +615,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
         elements: parsed.document.elements,
         selectedId: null,
         editingId: null,
+        loadRevision: get().loadRevision + 1,
       });
+      releaseOrphanUrls();
       return { ok: true, format: parsed.format, warnings: parsed.warnings };
     },
 
     reset: () => {
       recordHistoryNow();
       set({ canvas: { ...DEFAULT_CANVAS }, elements: [], selectedId: null, editingId: null });
+      releaseOrphanUrls();
     },
   };
 });

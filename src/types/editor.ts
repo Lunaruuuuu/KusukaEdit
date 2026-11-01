@@ -50,6 +50,15 @@ export interface TextElement extends BaseElement {
   fontStyle: TextFontStyle;
   /** Multiplier of fontSize (1.2 = 120%). */
   lineHeight: number;
+  /**
+   * Extra pixels that were ADDED to `width` when this text was imported from
+   * a Polotno file, so that a short word ("SALE") is not pushed onto a second
+   * line when this browser's font is a little wider than Polotno's. Absent
+   * (or 0) for everything else. Exporting to Polotno subtracts it again, so
+   * a Polotno file keeps its original width through an import/export cycle.
+   * Resizing the box by hand sets it to 0: the width the user chose is exact.
+   */
+  widthTolerance?: number;
 }
 
 export interface ShapeElement extends BaseElement {
@@ -62,12 +71,43 @@ export interface ShapeElement extends BaseElement {
   cornerRadius: number;
 }
 
-// Reserved for a future version: images survive import/export so no data is
-// lost, but the editor does not draw them yet (image upload is out of scope
-// for this MVP).
 export interface ImageElement extends BaseElement {
   type: "image";
+  /**
+   * Where the picture comes from:
+   *   blob:...   a picture uploaded in this session (temporary, in-memory)
+   *   data:...   a picture embedded in an exported file
+   *   https://   a picture linked from an imported (e.g. Polotno) file
+   * `blob:` URLs are converted to `data:` URLs on export.
+   */
   src: string;
+  /**
+   * The visible part of the picture, as FRACTIONS (0..1) of its natural size:
+   * (cropX, cropY) is the top-left corner, (cropWidth, cropHeight) the size.
+   * 0, 0, 1, 1 shows the whole picture stretched over the element's box.
+   * Imported Polotno images use this to fill a frame without distortion.
+   */
+  cropX: number;
+  cropY: number;
+  cropWidth: number;
+  cropHeight: number;
+  /**
+   * Mirroring. -1 flips the picture horizontally (scaleX) or vertically
+   * (scaleY) INSIDE its box: the box itself — (x, y), width, height — does
+   * not move, so a flipped picture stays exactly where it was. 1 = not flipped.
+   * (ElementRenderer mirrors the picture while drawing it; the element's x/y
+   * always stay the top-left corner of what is visible.) Only the SIGN is
+   * stored: the size lives in width/height. Files written before this field
+   * existed have no flip: both default to 1.
+   */
+  scaleX: 1 | -1;
+  scaleY: 1 | -1;
+  /**
+   * True for a vector picture (an SVG, e.g. an icon): `src` is an SVG URL or
+   * data URI. It is drawn like any other picture, and written back to Polotno
+   * as an `svg` element instead of an `image`.
+   */
+  vector?: boolean;
 }
 
 export type CanvasElement = TextElement | ShapeElement | ImageElement;

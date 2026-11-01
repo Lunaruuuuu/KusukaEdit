@@ -3,6 +3,7 @@
 import React, { useRef, useState } from "react";
 import { useEditorStore } from "@/store/useEditorStore";
 import { exportStageAsImage, type ImageFormat } from "@/lib/exportImage";
+import { resolveExportPixelRatio } from "@/lib/workspace";
 import type { ExportFormat } from "@/lib/polotnoAdapter";
 
 const FORMAT_LABEL: Record<ExportFormat, string> = {
@@ -15,6 +16,8 @@ export default function ActionPanel() {
   const loadFromJSON = useEditorStore((s) => s.loadFromJSON);
   const reset = useEditorStore((s) => s.reset);
   const stageNode = useEditorStore((s) => s.stageNode);
+  const canvasWidth = useEditorStore((s) => s.canvas.width);
+  const canvasHeight = useEditorStore((s) => s.canvas.height);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -22,20 +25,35 @@ export default function ActionPanel() {
   const [jsonFormat, setJsonFormat] = useState<ExportFormat>("kusuka");
   const [imageFormat, setImageFormat] = useState<ImageFormat>("png");
   const [resolution, setResolution] = useState(2);
+  const [exportingJson, setExportingJson] = useState(false);
 
-  function handleExportJSON() {
-    const json = exportToJSON(jsonFormat);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${jsonFormat === "polotno" ? "polotno" : "kusuka"}-design-${Date.now()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    setWarnings([]);
-    setMessage(`JSON format ${FORMAT_LABEL[jsonFormat]} berhasil diunduh.`);
+  // What the PNG/JPG will measure, from the CURRENT canvas size. Updates the
+  // moment the workspace is resized in the "Kanvas" tab.
+  const plan = resolveExportPixelRatio(canvasWidth, canvasHeight, resolution);
+
+  async function handleExportJSON() {
+    setExportingJson(true);
+    try {
+      // Async: uploaded pictures (temporary blob: URLs) are read back and
+      // embedded in the file, so it still works after a page refresh.
+      const { json, warnings: exportWarnings } = await exportToJSON(jsonFormat);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${jsonFormat === "polotno" ? "polotno" : "kusuka"}-design-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setWarnings(exportWarnings);
+      setMessage(`JSON format ${FORMAT_LABEL[jsonFormat]} berhasil diunduh.`);
+    } catch (err) {
+      setWarnings([]);
+      setMessage(`Gagal ekspor JSON: ${err instanceof Error ? err.message : "kesalahan tidak dikenal"}`);
+    } finally {
+      setExportingJson(false);
+    }
   }
 
   function handleExportImage() {
@@ -43,9 +61,25 @@ export default function ActionPanel() {
       setMessage("Kanvas belum siap, coba lagi sesaat lagi.");
       return;
     }
-    exportStageAsImage(stageNode, { format: imageFormat, pixelRatio: resolution });
-    setWarnings([]);
-    setMessage(`Gambar ${imageFormat.toUpperCase()} (${resolution}x) berhasil diunduh.`);
+    try {
+      const result = exportStageAsImage(stageNode, {
+        format: imageFormat,
+        pixelRatio: resolution,
+        // The picture is the design, not what happens to be on screen at this zoom.
+        designSize: { width: canvasWidth, height: canvasHeight },
+      });
+      setWarnings(
+        result.capped
+          ? [`Resolusi diturunkan ke ${result.pixelRatio}x agar sisi terpanjang tidak melebihi batas browser.`]
+          : []
+      );
+      setMessage(
+        `Gambar ${imageFormat.toUpperCase()} ${result.outputWidth} × ${result.outputHeight} px berhasil diunduh.`
+      );
+    } catch (err) {
+      setWarnings([]);
+      setMessage(err instanceof Error ? err.message : "Gagal mengekspor gambar.");
+    }
   }
 
   function handleImportClick() {
@@ -95,7 +129,9 @@ export default function ActionPanel() {
           </div>
         </div>
         <div className="panel-buttons">
-          <button onClick={handleExportJSON}>⬇ Export JSON ({FORMAT_LABEL[jsonFormat]})</button>
+          <button onClick={handleExportJSON} disabled={exportingJson}>
+            {exportingJson ? "Menyiapkan…" : `⬇ Export JSON (${FORMAT_LABEL[jsonFormat]})`}
+          </button>
           <button onClick={handleImportClick}>⬆ Import JSON</button>
         </div>
         <p className="hint hint--tight">Import mengenali format KusukaEdit dan Polotno otomatis.</p>
@@ -130,6 +166,10 @@ export default function ActionPanel() {
             ⬇ Export {imageFormat.toUpperCase()}
           </button>
         </div>
+        <p className="hint hint--tight">
+          Kanvas {canvasWidth} × {canvasHeight} px → hasil {plan.outputWidth} × {plan.outputHeight} px
+          {plan.capped ? ` (resolusi dibatasi ${plan.pixelRatio}x)` : ""}.
+        </p>
       </div>
 
       <div className="panel-section">

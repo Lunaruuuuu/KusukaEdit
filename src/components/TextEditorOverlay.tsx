@@ -15,8 +15,9 @@ import { useEditorStore } from "@/store/useEditorStore";
 // element. When editing ends the text is written to the store and the Konva
 // node becomes visible again.
 //
-// Mounted inside the same `position: relative` box as the <Stage>, which has
-// no zoom or pan, so stage coordinates equal CSS pixels.
+// Mounted inside a layer (CanvasWorkspace's `.overlay-layer`) that is as large
+// as the DESIGN and scaled by the same factor as the Stage, so everything here
+// is written in design pixels and stays on top of the Konva text at any zoom.
 // ---------------------------------------------------------------------------
 
 export default function TextEditorOverlay() {

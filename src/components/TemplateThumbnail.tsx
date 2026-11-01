@@ -80,7 +80,28 @@ export default function TemplateThumbnail({ document: doc }: { document: CanvasD
           );
         }
 
-        return null; // images are not drawn by the editor yet
+        // Picture. A nested <svg> whose viewBox is the crop rectangle (in
+        // fractions of the picture) shows exactly the cropped part, stretched
+        // over the element's box the same way the canvas draws it.
+        // Mirroring happens inside the box, like on the canvas.
+        const mirror =
+          `translate(${el.scaleX === -1 ? el.width : 0} ${el.scaleY === -1 ? el.height : 0}) ` +
+          `scale(${el.scaleX} ${el.scaleY})`;
+        return (
+          <g key={el.id} transform={transform}>
+            <rect width={el.width} height={el.height} fill="#d1d5db" />
+            <g transform={mirror}>
+              <svg
+                width={el.width}
+                height={el.height}
+                viewBox={`${el.cropX} ${el.cropY} ${el.cropWidth} ${el.cropHeight}`}
+                preserveAspectRatio="none"
+              >
+                <image href={el.src} width={1} height={1} preserveAspectRatio="none" />
+              </svg>
+            </g>
+          </g>
+        );
       })}
     </svg>
   );

@@ -1,9 +1,10 @@
 "use client";
 
-import React from "react";
+import React, { useRef, useState } from "react";
 import { useEditorStore } from "@/store/useEditorStore";
 import { TextAlign } from "@/types/editor";
 import { toInputColor } from "@/lib/color";
+import { prepareImageFile } from "@/lib/imageUpload";
 
 const FONT_FAMILIES = [
   "Inter, sans-serif",
@@ -19,8 +20,35 @@ export default function ContextualToolbar() {
   const updateElement = useEditorStore((s) => s.updateElement);
   const reorderElement = useEditorStore((s) => s.reorderElement);
   const removeElement = useEditorStore((s) => s.removeElement);
+  const replaceImageSource = useEditorStore((s) => s.replaceImageSource);
+
+  // Hooks must run before the early return below.
+  const replaceInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceTargetRef = useRef<string | null>(null);
+  const [replaceBusy, setReplaceBusy] = useState(false);
+  const [replaceError, setReplaceError] = useState<string | null>(null);
 
   const selected = elements.find((e) => e.id === selectedId);
+
+  async function handleReplaceFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // choosing the same file twice must still fire `change`
+    const targetId = replaceTargetRef.current;
+    if (!file || !targetId) return;
+
+    setReplaceBusy(true);
+    setReplaceError(null);
+    try {
+      // The target id is captured when the button was clicked: the user may
+      // select another element while the picture is loading, and the new
+      // picture must still land on the element they asked to replace.
+      replaceImageSource(targetId, await prepareImageFile(file));
+    } catch (err) {
+      setReplaceError(err instanceof Error ? err.message : "Gambar gagal diganti.");
+    } finally {
+      setReplaceBusy(false);
+    }
+  }
 
   if (!selected) {
     return (
@@ -120,6 +148,32 @@ export default function ContextualToolbar() {
             />
           </label>
         </>
+      )}
+
+      {selected.type === "image" && (
+        <div className="field">
+          <span>Gambar</span>
+          <button
+            className="toolbar-button"
+            onClick={() => {
+              setReplaceError(null);
+              replaceTargetRef.current = selected.id;
+              replaceInputRef.current?.click();
+            }}
+            disabled={replaceBusy}
+            title="Ganti isi gambar; posisi dan lebar tetap, tinggi mengikuti rasio gambar baru"
+          >
+            {replaceBusy ? "Memuat…" : "Ganti gambar"}
+          </button>
+          <input
+            ref={replaceInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={handleReplaceFile}
+          />
+          {replaceError && <span className="error-note error-note--inline">{replaceError}</span>}
+        </div>
       )}
 
       <div className="field field--layering">
