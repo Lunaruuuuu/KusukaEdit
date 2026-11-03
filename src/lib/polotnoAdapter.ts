@@ -22,14 +22,19 @@
 //   text    fill (fallback: color)          -> text.fill
 //   text    fontWeight + fontStyle          -> text.fontStyle ("bold italic" ...)
 //   text    width (+ TEXT_WIDTH_TOLERANCE)  -> text.width + text.widthTolerance
+//   text    align (left/center/right/justify) -> text.align
+//   text    stroke + strokeWidth, textDecoration, letterSpacing (fraction of
+//           fontSize), textTransform (upper/lower) -> the same fields
+//   text    custom.listType / custom.autoFit (written by this editor) -> listType / autoFit
+//   any     opacity                         -> opacity (absent when 1)
+//   any     shadowEnabled + shadowColor / shadowBlur / shadowOffsetX|Y /
+//           shadowOpacity                   -> shadow* (text, figure, image and svg)
 //   figure  subType rect | circle           -> shape.shapeType
 //   image   src, cropX/Y/Width/Height       -> image (src + crop as 0..1 fractions)
 //   svg     src (URL or data URI), colorsReplace -> image with vector: true
 //   image/svg  flipX, flipY, scaleX, scaleY -> image.scaleX / scaleY (= ±1)
 //   image/svg  blurEnabled + blurRadius     -> image.blurRadius
 //   image/svg  borderSize + borderColor     -> image.strokeWidth + image.stroke
-//   image/svg  shadowEnabled + shadowColor / shadowBlur / shadowOffsetX|Y /
-//              shadowOpacity                -> image.shadow* (see lib/polotnoEffects.ts)
 //   image/svg  clipSrc (circle / triangle)  -> image.maskShape
 //   image/svg  cornerRadius                 -> image.cornerRadius
 //   image/svg  brightnessEnabled + brightness, sepiaEnabled, grayscaleEnabled,
@@ -72,9 +77,14 @@ import { isColorSpecified, normalizeColor, parseColor } from "@/lib/color";
 import {
   hasUnknownFilters,
   imageEffectsToPolotno,
+  opacityToPolotno,
+  readNativeCommonEffects,
   readNativeImageEffects,
+  readPolotnoCommonEffects,
   readPolotnoImageEffects,
+  shadowToPolotno,
 } from "@/lib/polotnoEffects";
+import { hasUnknownDecoration, readTextOptions } from "@/lib/textOptions";
 import { isObjectUrl } from "@/lib/objectUrls";
 
 // ----------------------------- Polotno types ------------------------------
@@ -174,7 +184,7 @@ function str(value: unknown, fallback: string): string {
   return typeof value === "string" ? value : fallback;
 }
 
-const TEXT_ALIGNS: readonly TextAlign[] = ["left", "center", "right"];
+const TEXT_ALIGNS: readonly TextAlign[] = ["left", "center", "right", "justify"];
 const FONT_STYLES: readonly TextFontStyle[] = ["normal", "bold", "italic", "bold italic"];
 
 function pluralize(count: number, noun: string): string {
@@ -626,6 +636,8 @@ function sanitizeNativePage(
         ...(num(item.widthTolerance, 0) > 0
           ? { widthTolerance: Math.min(100, num(item.widthTolerance, 0)) }
           : {}),
+        ...readTextOptions(item, "native"),
+        ...readNativeCommonEffects(item),
       };
       elements.push(el);
       return;
@@ -646,6 +658,7 @@ function sanitizeNativePage(
         strokeWidth: Math.max(0, num(item.strokeWidth, 0)),
         // v1 always drew rectangles with a 4px radius.
         cornerRadius: item.shapeType === "rect" ? Math.max(0, num(item.cornerRadius, 4)) : 0,
+        ...readNativeCommonEffects(item),
       };
       elements.push(el);
       return;
@@ -736,12 +749,9 @@ export function sanitizeKusukaDocument(
 
 function hasUnsupportedEffects(child: Record<string, unknown>): boolean {
   const isPicture = child.type === "image" || child.type === "svg";
-  if (typeof child.opacity === "number" && child.opacity < 1) return true;
-  if (child.shadowEnabled === true || child.blurEnabled === true) {
-    // A picture's blur and shadow are supported (ImageElement.blurRadius /
-    // shadow*); on text and shapes they are not.
-    if (!isPicture) return true;
-  }
+  // Opacity and the drop shadow are supported on every element type
+  // (BaseElement.opacity / shadow*); blur only on pictures.
+  if (child.blurEnabled === true && !isPicture) return true;
   if (
     child.brightnessEnabled === true ||
     child.sepiaEnabled === true ||
@@ -753,10 +763,16 @@ function hasUnsupportedEffects(child: Record<string, unknown>): boolean {
   }
   if (child.backgroundEnabled === true || child.curveEnabled === true) return true;
   if (child.type === "text") {
-    if (num(child.strokeWidth, 0) > 0) return true;
-    if (num(child.letterSpacing, 0) !== 0) return true;
-    if (typeof child.textDecoration === "string" && child.textDecoration !== "") return true;
-    if (typeof child.textTransform === "string" && child.textTransform !== "none") return true;
+    // Supported: stroke + strokeWidth, letterSpacing, underline / line-through,
+    // upper / lower case (see lib/textOptions.ts). Not: other decorations
+    // ("overline") and other cases ("capitalize").
+    if (hasUnknownDecoration(child.textDecoration)) return true;
+    if (
+      typeof child.textTransform === "string" &&
+      !["none", "", "uppercase", "lowercase"].includes(child.textTransform)
+    ) {
+      return true;
+    }
   }
   if (isPicture) {
     // Supported: flipX / flipY (scaleX / scaleY), borderSize (stroke), a circle
@@ -867,6 +883,13 @@ function convertPolotnoPage(
     return "#000000";
   };
 
+  // Same as `color`, for readers that want null (not a fallback) for "unusable".
+  const optionalColor = (value: unknown): string | null => {
+    const parsed = parseColor(value);
+    if (parsed === null && isColorSpecified(value)) t.badColors++;
+    return parsed;
+  };
+
   const children = Array.isArray(page?.children) ? page.children : [];
   children.forEach((child) => {
     if (!isRecord(child)) return;
@@ -884,9 +907,7 @@ function convertPolotnoPage(
       const fields = base();
       const align: TextAlign = TEXT_ALIGNS.includes(child.align as TextAlign)
         ? (child.align as TextAlign)
-        : child.align === "justify"
-          ? "left"
-          : "center"; // Polotno's default alignment
+        : "center"; // Polotno's default alignment
 
       // Rich text arrives as HTML; Konva needs the plain string.
       const cleaned = cleanPolotnoText(str(child.text, ""));
@@ -918,6 +939,8 @@ function convertPolotnoPage(
         fontStyle: composeFontStyle(isBoldWeight(child.fontWeight), child.fontStyle === "italic"),
         lineHeight,
         ...(pad > 0 ? { widthTolerance: pad } : {}),
+        ...readTextOptions(child, "polotno", optionalColor),
+        ...readPolotnoCommonEffects(child, color),
       };
       if (hasUnsupportedEffects(child)) t.effectCount++;
       if (hasIgnoredTransform(child)) t.ignoredTransforms++;
@@ -941,6 +964,7 @@ function convertPolotnoPage(
         stroke: color(child.stroke, "#62c5ff"),
         strokeWidth: Math.max(0, num(child.strokeWidth, 0)),
         cornerRadius: shapeType === "rect" ? Math.max(0, num(child.cornerRadius, 0)) : 0,
+        ...readPolotnoCommonEffects(child, color),
       };
       if (hasUnsupportedEffects(child)) t.effectCount++;
       if (hasIgnoredTransform(child)) t.ignoredTransforms++;
@@ -1088,7 +1112,7 @@ export function convertPolotnoToKusuka(
   }
   if (t.effectCount > 0) {
     warnings.push(
-      `${pluralize(t.effectCount, "elemen")} memakai efek yang belum didukung (opacity, bayangan/blur/filter warna pada teks dan bentuk, dll.); tampilan bisa sedikit berbeda.`
+      `${pluralize(t.effectCount, "elemen")} memakai efek yang belum didukung (blur atau filter warna pada teks dan bentuk, latar teks, teks melengkung, garis putus-putus, dll.); tampilan bisa sedikit berbeda.`
     );
   }
 
@@ -1102,7 +1126,7 @@ function polotnoCommon(el: CanvasElement): PolotnoElement {
     id: el.id,
     type: el.type,
     name: "",
-    opacity: 1,
+    opacity: opacityToPolotno(el),
     visible: true,
     selectable: true,
     removable: true,
@@ -1114,6 +1138,16 @@ function polotnoCommon(el: CanvasElement): PolotnoElement {
     height: el.height,
     rotation: el.rotation,
   };
+}
+
+/** `custom` of an exported text: our source marker, list type and auto-fit (only what applies). */
+function textCustom(el: TextElement, padded: boolean): { custom?: Record<string, unknown> } {
+  const custom: Record<string, unknown> = {
+    ...(padded ? {} : { source: OWN_EXPORT_SOURCE }),
+    ...(el.listType ? { listType: el.listType } : {}),
+    ...(el.autoFit ? { autoFit: true } : {}),
+  };
+  return Object.keys(custom).length > 0 ? { custom } : {};
 }
 
 function toPolotnoElement(el: CanvasElement): PolotnoElement {
@@ -1131,21 +1165,26 @@ function toPolotnoElement(el: CanvasElement): PolotnoElement {
           }
         : {}),
       // Only a width measured here (no tolerance) is marked as such, so it is
-      // not padded a second time when this file is imported again.
-      ...(pad > 0 ? {} : { custom: { source: OWN_EXPORT_SOURCE } }),
+      // not padded a second time when this file is imported again. List and
+      // auto-fit have no Polotno field: they ride along in `custom` too.
+      ...textCustom(el, pad > 0),
       text: el.text,
       placeholder: "",
       fontSize: el.fontSize,
       fontFamily: toPolotnoFontFamily(el.fontFamily),
       fontStyle: el.fontStyle.includes("italic") ? "italic" : "normal",
       fontWeight: el.fontStyle.includes("bold") ? "bold" : "normal",
-      textDecoration: "",
+      textDecoration: el.textDecoration ?? "",
       fill: el.fill,
       align: el.align,
       verticalAlign: "top",
       lineHeight: el.lineHeight,
-      letterSpacing: 0,
-      strokeWidth: 0,
+      letterSpacing: el.letterSpacing ?? 0,
+      ...(el.textTransform ? { textTransform: el.textTransform } : {}),
+      ...(el.stroke && el.strokeWidth && el.strokeWidth > 0
+        ? { stroke: el.stroke, strokeWidth: el.strokeWidth }
+        : { strokeWidth: 0 }),
+      ...shadowToPolotno(el),
     };
   }
   if (el.type === "shape") {
@@ -1158,6 +1197,7 @@ function toPolotnoElement(el: CanvasElement): PolotnoElement {
       strokeWidth: el.strokeWidth,
       cornerRadius: el.cornerRadius,
       dash: [],
+      ...shadowToPolotno(el),
     };
   }
   // The box (x, y, width, height) is written as it is: Polotno's flipX/flipY

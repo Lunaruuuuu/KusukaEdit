@@ -28,6 +28,7 @@ export const FILTER_PRESETS: readonly FilterPreset[] = [
 
 export type ImageEffectFields = Pick<
   ImageElement,
+  | "opacity"
   | "blurRadius"
   | "stroke"
   | "strokeWidth"
@@ -86,6 +87,34 @@ export function resolveFilter(
   return { brightness, contrast, saturation, preset };
 }
 
+/** The drop-shadow fields every element type has (see BaseElement). */
+export type ShadowFields = Pick<
+  ImageElement,
+  "shadowColor" | "shadowBlur" | "shadowOffsetX" | "shadowOffsetY" | "shadowOpacity"
+>;
+
+export type ResolvedShadow = NonNullable<ResolvedEffects["shadow"]>;
+
+/**
+ * The drop shadow of ANY element (text, shape or picture), or null when there
+ * is none to see: no colour, a transparent one, zero opacity, or no blur and
+ * no offset (the shadow would sit exactly under the element).
+ */
+export function resolveShadow(el: Partial<ShadowFields>): ResolvedShadow | null {
+  if (typeof el.shadowColor !== "string" || el.shadowColor === "" || isInvisibleColor(el.shadowColor)) return null;
+  const blur = finite(el.shadowBlur) ? clamp(el.shadowBlur, 0, MAX_SHADOW_BLUR) : 0;
+  const offsetX = finite(el.shadowOffsetX) ? clamp(el.shadowOffsetX, -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET) : 0;
+  const offsetY = finite(el.shadowOffsetY) ? clamp(el.shadowOffsetY, -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET) : 0;
+  const opacity = finite(el.shadowOpacity) ? clamp(el.shadowOpacity, 0, 1) : 1;
+  if (opacity <= 0 || (blur === 0 && offsetX === 0 && offsetY === 0)) return null;
+  return { color: el.shadowColor, blur, offsetX, offsetY, opacity };
+}
+
+/** Opacity of any element, 0..1. Absent or unreadable = 1. */
+export function resolveOpacity(el: { opacity?: number }): number {
+  return finite(el.opacity) ? clamp(el.opacity, 0, 1) : 1;
+}
+
 /**
  * Reads the optional effect fields of an element into what is really drawn.
  * An effect with nothing to show (a border with width 0, a shadow with no blur
@@ -101,16 +130,7 @@ export function resolveImageEffects(el: Partial<ImageEffectFields>): ResolvedEff
       ? { color: el.stroke, width: strokeWidth }
       : null;
 
-  let shadow: ResolvedEffects["shadow"] = null;
-  if (typeof el.shadowColor === "string" && el.shadowColor !== "" && !isInvisibleColor(el.shadowColor)) {
-    const shadowBlur = finite(el.shadowBlur) ? clamp(el.shadowBlur, 0, MAX_SHADOW_BLUR) : 0;
-    const offsetX = finite(el.shadowOffsetX) ? clamp(el.shadowOffsetX, -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET) : 0;
-    const offsetY = finite(el.shadowOffsetY) ? clamp(el.shadowOffsetY, -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET) : 0;
-    const opacity = finite(el.shadowOpacity) ? clamp(el.shadowOpacity, 0, 1) : 1;
-    if (opacity > 0 && (shadowBlur > 0 || offsetX !== 0 || offsetY !== 0)) {
-      shadow = { color: el.shadowColor, blur: shadowBlur, offsetX, offsetY, opacity };
-    }
-  }
+  const shadow = resolveShadow(el);
 
   const mask = el.maskShape !== undefined && MASK_SHAPES.includes(el.maskShape) ? el.maskShape : null;
   // A circle or a triangle has no corners to round.

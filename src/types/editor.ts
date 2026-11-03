@@ -10,8 +10,14 @@
 
 export type ElementType = "text" | "shape" | "image";
 export type ShapeKind = "rect" | "circle";
-export type TextAlign = "left" | "center" | "right";
+export type TextAlign = "left" | "center" | "right" | "justify";
 export type TextFontStyle = "normal" | "bold" | "italic" | "bold italic";
+/** Lines drawn through the text; Konva and Polotno both accept these strings. */
+export type TextDecoration = "underline" | "line-through" | "underline line-through";
+/** Display-only case change: the stored `text` keeps what the user typed. */
+export type TextTransform = "uppercase" | "lowercase";
+/** Every paragraph (line typed with Enter) gets a bullet or a number in front. */
+export type TextListType = "bullet" | "number";
 
 /**
  * Schema version written by exportToJSON().
@@ -19,10 +25,15 @@ export type TextFontStyle = "normal" | "bold" | "italic" | "bold italic";
  *   v2: every element, circles included, is stored by its top-left corner.
  *   v3: a document is a list of PAGES (`pages`), each with its own canvas and
  *       elements; v1/v2 files had a single `canvas` + `elements`.
+ *   v4: opacity and drop shadow on EVERY element type (they were picture-only),
+ *       a border (stroke) on text, and the text options of the Polotno-style
+ *       toolbar: justify, underline / strike-through, letter spacing, upper /
+ *       lower case, bullet / numbered lists and auto-fit. All new fields are
+ *       optional, so a v3 file is a valid v4 file as it is.
  * Files with an older `version` are migrated automatically on load (a v1/v2
  * file becomes a one-page document).
  */
-export const SCHEMA_VERSION = 3 as const;
+export const SCHEMA_VERSION = 4 as const;
 
 /** The last schema in which a document was ONE canvas (`canvas` + `elements`). */
 export const LAST_SINGLE_PAGE_SCHEMA = 2 as const;
@@ -44,6 +55,20 @@ interface BaseElement {
   height: number;
   rotation: number; // degrees
   zIndex: number;
+
+  // ---- Effects shared by every element type (all optional) -----------------
+  // Polotno: opacity, shadowEnabled + shadowColor / shadowBlur / shadowOffsetX /
+  // shadowOffsetY / shadowOpacity. Lengths are in design pixels.
+
+  /** 0..1 for the whole element. Absent = 1 (fully opaque). */
+  opacity?: number;
+  /** Drop-shadow colour (#rrggbb). Absent = no shadow. */
+  shadowColor?: string;
+  shadowBlur?: number;
+  shadowOffsetX?: number;
+  shadowOffsetY?: number;
+  /** 0..1, multiplied into the shadow colour. Absent = 1. */
+  shadowOpacity?: number;
 }
 
 export interface TextElement extends BaseElement {
@@ -65,6 +90,24 @@ export interface TextElement extends BaseElement {
    * Resizing the box by hand sets it to 0: the width the user chose is exact.
    */
   widthTolerance?: number;
+
+  // ---- Toolbar options (all optional: absent = off / Konva's default) -------
+  /** Outline of the letters (#rrggbb). Drawn only when strokeWidth > 0. */
+  stroke?: string;
+  strokeWidth?: number;
+  textDecoration?: TextDecoration;
+  /** Extra space between characters, as a FRACTION of fontSize (0.1 = 10%), like Polotno. */
+  letterSpacing?: number;
+  textTransform?: TextTransform;
+  listType?: TextListType;
+  /**
+   * Auto-fit: the box keeps a fixed `height` (the user resizes it with every
+   * handle) and the text is drawn with the largest font size, up to `fontSize`,
+   * that fits it — no line taller than the box, no word wider than it. The
+   * stored `fontSize` is the user's choice and never changes; only the drawn
+   * size shrinks (see lib/textFit.ts).
+   */
+  autoFit?: boolean;
 }
 
 export interface ShapeElement extends BaseElement {
@@ -116,9 +159,9 @@ export interface ImageElement extends BaseElement {
   vector?: boolean;
 
   // ---- Visual effects (all optional: absent = no effect) -------------------
-  // They are what Polotno calls blurRadius, borderSize / borderColor,
-  // shadowColor / shadowBlur / shadowOffsetX / shadowOffsetY / shadowOpacity and
-  // clipSrc. Every length is in design pixels.
+  // They are what Polotno calls blurRadius, borderSize / borderColor and
+  // clipSrc. Every length is in design pixels. Opacity and the drop shadow are
+  // shared with every element type (see BaseElement).
 
   /** Gaussian-style blur of the whole picture (Konva.Filters.Blur). 0 / absent = sharp. */
   blurRadius?: number;
@@ -126,13 +169,6 @@ export interface ImageElement extends BaseElement {
   stroke?: string;
   /** Border thickness; 0 / absent = no border. */
   strokeWidth?: number;
-  /** Drop-shadow colour (#rrggbb). Absent = no shadow. */
-  shadowColor?: string;
-  shadowBlur?: number;
-  shadowOffsetX?: number;
-  shadowOffsetY?: number;
-  /** 0..1, multiplied into the shadow colour. Absent = 1. */
-  shadowOpacity?: number;
   /**
    * Cuts the picture to a shape that is fitted into the element's box: a circle
    * (an ellipse when the box is not square) or a triangle (apex at the top

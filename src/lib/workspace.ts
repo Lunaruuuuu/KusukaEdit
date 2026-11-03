@@ -118,3 +118,42 @@ export function fitImageToCanvas(naturalWidth: number, naturalHeight: number, ca
   const round2 = (n: number) => Math.round(n * 100) / 100;
   return { width: round2(nw * scale), height: round2(nh * scale) };
 }
+
+/** The box of an element: what fitElementToPage() reads and writes. */
+export interface ElementBox extends Size {
+  type: "text" | "shape" | "image";
+  x: number;
+  y: number;
+  rotation: number;
+}
+
+/**
+ * "Fit to page": the element scaled proportionally (its aspect ratio kept) to
+ * the largest size that fits inside the page, centred, upright. Returns the new
+ * x / y / width / height / rotation, or null when nothing would change — or for
+ * text, whose height follows its words and cannot be scaled this way.
+ */
+export function fitElementToPage(
+  el: ElementBox,
+  page: Size
+): { x: number; y: number; width: number; height: number; rotation: number } | null {
+  if (el.type === "text" || !(el.width > 0) || !(el.height > 0)) return null;
+  const scale = Math.min(page.width / el.width, page.height / el.height);
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const width = round2(el.width * scale);
+  const height = round2(el.height * scale);
+  const box = {
+    x: round2((page.width - width) / 2),
+    y: round2((page.height - height) / 2),
+    width,
+    height,
+    rotation: 0,
+  };
+  const same =
+    Math.abs(box.x - el.x) < 0.01 &&
+    Math.abs(box.y - el.y) < 0.01 &&
+    Math.abs(box.width - el.width) < 0.01 &&
+    Math.abs(box.height - el.height) < 0.01 &&
+    el.rotation === 0;
+  return same ? null : box;
+}

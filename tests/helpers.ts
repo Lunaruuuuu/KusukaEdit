@@ -2,16 +2,16 @@
 // and most tests only care about the page being edited.
 import { useEditorStore } from "@/store/useEditorStore";
 import { selectCanvas, selectElements } from "@/store/selectors";
-import type { CanvasDocument, CanvasElement, CanvasMeta, Page } from "@/types/editor";
+import { SCHEMA_VERSION, type CanvasDocument, type CanvasElement, type CanvasMeta, type Page } from "@/types/editor";
 
 /** Elements of the active page. */
 export const E = (): CanvasElement[] => selectElements(useEditorStore.getState());
 /** Canvas of the active page. */
 export const C = (): CanvasMeta => selectCanvas(useEditorStore.getState());
 
-/** A one-page native (v3) document, the shape most tests need. */
+/** A one-page native document (current schema), the shape most tests need. */
 export function onePage(canvas: CanvasMeta, elements: CanvasElement[], id = "page-1"): CanvasDocument {
-  return { version: 3, pages: [{ id, canvas, elements }] };
+  return { version: SCHEMA_VERSION, pages: [{ id, canvas, elements }] };
 }
 
 /** A page for building documents by hand. */

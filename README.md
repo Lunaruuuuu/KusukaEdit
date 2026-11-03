@@ -4,19 +4,18 @@ Prototipe / MVP komponen design editor kanvas untuk Next.js, terinspirasi dari
 arsitektur [Polotno](https://polotno.com/). Dibangun dengan **React-Konva**
 untuk rendering kanvas, dan **Zustand** untuk state management.
 
-Status: **MVP kerja praktek, versi 7** — di atas semua fitur sebelumnya (Undo/Redo,
-Export Gambar, Docker, edit teks langsung, adapter Polotno, template, copy/paste,
-upload gambar, pengaturan kanvas, parser teks Polotno, vektor/SVG, gambar terbalik,
-Fit-to-Screen dan zoom, drag-and-drop gambar, crop, dan efek gambar), versi ini
-menambahkan: **dokumen multi-halaman** (`pages: Page[]` + `currentPageIndex`; tambah,
-duplikat, dan hapus halaman lewat strip thumbnail), **berkas JSON v3** serta **adapter
-Polotno yang memetakan seluruh halaman** ke dua arah (batas "hanya halaman pertama"
-dicabut), **indikator crop** (lapisan gelap di luar jendela potong dan handle siku
-berwarna amber yang berbeda dari Transformer), **panel Filter & Efek** gambar
-(kecerahan, kontras, saturasi, preset, blur, sudut membulat, bayangan, garis tepi,
-mask) dengan toolbar dan panel samping yang ditata ulang, **export gambar halaman
-aktif atau semua halaman (satu berkas ZIP)**, dan **galeri template Polotno** berupa
-kartu thumbnail.
+Status: **MVP kerja praktek, versi 8** (paket `0.8.0`, rilis "KusukaEdit Ver 0.6") — di
+atas semua fitur sebelumnya (multi-halaman, adapter Polotno dua arah, crop, filter & efek
+gambar, export PNG/JPG/ZIP, template, dan seterusnya), versi ini menambahkan:
+**efek lintas elemen** (transparansi dan bayangan untuk teks, bentuk, dan gambar; garis tepi
+huruf pada teks) yang juga disalin dari/ke Polotno tanpa peringatan, **toolbar kontekstual
+satu baris ala Polotno** untuk teks (warna, font, ukuran dengan panah, B/I/U/S, perataan
+termasuk justify, daftar berpoin/bernomor, spasi huruf & baris, huruf besar/kecil, Efek),
+gambar (Pangkas, Balik, Efek, Pas halaman, Mask) dan bentuk (isi, garis tepi, tebal, Efek),
+**seleksi ganda** lewat kotak seret (marquee) dan `Ctrl/Cmd`+klik dengan satu Transformer
+untuk semuanya, serta **auto-fit teks** (ukuran huruf mengecil sendiri bila teks tidak muat
+di kotaknya). Skema JSON native naik ke **v4** (semua field baru opsional; berkas v3 dibuka
+apa adanya).
 
 ## Daftar isi
 
@@ -33,11 +32,15 @@ kartu thumbnail.
 - [Drag-and-drop gambar ke kanvas](#drag-and-drop-gambar-ke-kanvas)
 - [Pemangkasan (crop) gambar](#pemangkasan-crop-gambar)
 - [Filter & efek gambar](#filter--efek-gambar)
+- [Efek lintas elemen (teks, bentuk, gambar)](#efek-lintas-elemen-teks-bentuk-gambar)
+- [Toolbar kontekstual ala Polotno](#toolbar-kontekstual-ala-polotno)
+- [Seleksi ganda: kotak seret & Ctrl/Cmd+klik](#seleksi-ganda-kotak-seret--ctrlcmdklik)
+- [Auto-fit teks (kecilkan otomatis)](#auto-fit-teks-kecilkan-otomatis)
 - [Edit teks langsung (In-Place Text Editing)](#edit-teks-langsung-in-place-text-editing)
 - [Copy & Paste elemen](#copy--paste-elemen-ctrlc--ctrlv)
 - [Undo / Redo](#sistem-undo--redo-history-stack)
 - [Export ke gambar (satu halaman atau semua)](#export-ke-gambar-png--jpg)
-- [Skema JSON native (v3)](#skema-dokumen-json-native-v3)
+- [Skema JSON native (v4)](#skema-dokumen-json-native-v4)
 - [Adapter Polotno (dua arah, semua halaman)](#adapter-polotno-import--export-dua-arah)
 - [Template](#template-galeri-preset)
 - [Keyboard shortcuts](#keyboard-shortcuts)
@@ -60,9 +63,12 @@ kartu thumbnail.
       dan diganti isinya; URL sementara dibersihkan otomatis
 - [x] **Pengaturan workspace**: lebar/tinggi manual, preset rasio (1:1, 4:5, 4:3,
       16:9, 9:16), dan warna latar; ukuran kanvas ikut menentukan hasil export gambar
-- [x] Contextual toolbar yang dikelompokkan dan berlabel: warna, font, ukuran,
-      perataan (teks); isi, garis, tebal (bentuk); Pangkas / Reset / Ganti / Filter &
-      Efek (gambar); susunan lapisan; Hapus
+- [x] **Toolbar kontekstual satu baris ala Polotno** (v8): teks — warna, font, ukuran
+      dengan panah ▲▼, auto-fit, **B / I / U / S**, perataan kiri/tengah/kanan/**justify**
+      (satu tombol bersiklus), daftar **berpoin / bernomor**, spasi huruf & baris, **AA / aa**,
+      menu **Efek**; gambar — Pangkas, Reset, **Balik** (horizontal/vertikal), Efek, **Pas
+      halaman**, **Mask**, Ganti; bentuk — warna isi, warna & tebal garis tepi, sudut, Efek;
+      lalu menu Posisi (lapisan) dan Hapus
 - [x] **Export / Import JSON** dengan dua pilihan format: **Native (KusukaEdit)**
       dan **Polotno-compatible**; format file terdeteksi otomatis saat import
 - [x] **Galeri template**: 11 kartu thumbnail — 7 berkas format Polotno (beberapa
@@ -119,9 +125,21 @@ kartu thumbnail.
 - [x] **Export gambar dengan pilihan cakupan**: **Halaman aktif** (`stage.toDataURL()`,
       satu PNG/JPG) atau **Semua halaman** (dirender berurutan, satu berkas ZIP berisi
       satu gambar per halaman pada ukurannya sendiri)
-- [x] **Test suite** (`npm test`, 224 tes) untuk adapter, store dan halaman, memori
-      gambar, ukuran kanvas, zoom, export, ZIP, template, crop, drop, filter, dan efek
-      gambar
+- [x] **Efek lintas elemen** (v8): `opacity` dan bayangan (`shadowColor`, `shadowBlur`,
+      `shadowOffsetX/Y`, `shadowOpacity`) untuk **semua** tipe elemen, garis tepi huruf
+      (`stroke`/`strokeWidth`) untuk teks; digambar di `Konva.Text`, `Rect`, `Ellipse`, dan
+      `Shape` gambar, dan disalin dari/ke Polotno **tanpa** masuk daftar peringatan
+- [x] **Seleksi ganda** (v8): seret kotak di area kosong halaman (**marquee**) memilih
+      setiap elemen yang bersinggungan secara langsung saat diseret; `Ctrl/Cmd`+klik
+      (juga `Shift`+klik) menambah/mengurangi; satu Transformer untuk semuanya; geser,
+      ubah ukuran, putar, panah, dan Delete pada grup = **satu langkah undo**; `Ctrl/Cmd+A`
+      memilih semua, `Esc` membatalkan
+- [x] **Auto-fit teks** (v8): kotak teks bertinggi tetap; ukuran huruf mengecil
+      proporsional (kelipatan 0,5 px) sampai tidak ada baris yang keluar dari tinggi kotak
+      dan tidak ada kata yang lebih lebar dari kotak, diukur dengan `measureSize` Konva
+- [x] **Test suite** (`npm test`, 247 tes) untuk adapter, store dan halaman, memori
+      gambar, ukuran kanvas, zoom, export, ZIP, template, crop, drop, filter, efek gambar,
+      efek lintas elemen, opsi teks, auto-fit, marquee, dan seleksi ganda
 
 ## Struktur Proyek
 
@@ -132,7 +150,7 @@ canvas-editor/
 │   ├── page.tsx                   # Halaman utama, merender <EditorRoot />
 │   └── globals.css
 ├── src/
-│   ├── types/editor.ts            # Skema TypeScript: Page, CanvasDocument (native v3), elemen
+│   ├── types/editor.ts            # Skema TypeScript: Page, CanvasDocument (native v4), elemen
 │   ├── store/
 │   │   ├── useEditorStore.ts      # Zustand: pages + currentPageIndex, history, clipboard, actions, JSON
 │   │   └── selectors.ts           # selectCurrentPage / selectCanvas / selectElements / selectElementById
@@ -151,8 +169,12 @@ canvas-editor/
 │   │   ├── drawPicture.ts         # Cara gambar digambar di Konva (crop, cermin, mask, sudut membulat, garis tepi, bayangan) — murni
 │   │   ├── crop.ts                # Matematika crop: pecahan <-> kotak, tepi/sudut, geser, reset, piksel asli (murni)
 │   │   ├── dropImage.ts           # Drag-and-drop: jenis seretan, berkas yang dipakai, kursor -> koordinat desain (murni)
-│   │   ├── imageEffects.ts        # Efek mana yang benar-benar aktif + konfigurasi blur Konva (murni)
-│   │   ├── imageStyle.ts          # Patch gaya gambar: validasi, pembatasan, "undefined = hapus" (murni)
+│   │   ├── imageEffects.ts        # Efek mana yang benar-benar aktif (juga resolveShadow / resolveOpacity untuk semua elemen) + blur Konva (murni)
+│   │   ├── imageStyle.ts          # Patch gaya elemen (gambar, teks, bentuk): validasi, pembatasan, "undefined = hapus" (murni)
+│   │   ├── textOptions.ts         # Opsi teks toolbar: dekorasi, spasi huruf, huruf besar/kecil, daftar, baca dari berkas (murni)
+│   │   ├── textFit.ts             # Auto-fit teks: bungkus kata seperti Konva + cari ukuran huruf terbesar yang muat (murni)
+│   │   ├── selection.ts           # Marquee: kotak dari dua titik, perpotongan kotak berotasi (SAT), hasil seleksi (murni)
+│   │   ├── transform.ts           # Transformer -> field elemen ("bake" skala ke lebar/tinggi/ukuran huruf) (murni)
 │   │   ├── imageFilters.ts        # Filter warna: matriks 4x5 (kecerahan, kontras, saturasi, preset) + piksel
 │   │   ├── zoom.ts                # Skala tampilan: fit, langkah zoom, ukuran Stage (fungsi murni)
 │   │   ├── useCanvasZoom.ts       # Hook React: mode Fit/manual, ukur area, Ctrl+scroll
@@ -176,7 +198,7 @@ canvas-editor/
 │   │   └── post-sosmed.polotno.json
 │   └── components/
 │       ├── EditorRoot.tsx         # Wrapper client + dynamic import (ssr:false); susunan toolbar, panel gaya, kanvas, strip halaman
-│       ├── CanvasWorkspace.tsx    # Stage/Layer/Transformer + skala tampilan + keyboard shortcut + drag-and-drop + penutup progres export
+│       ├── CanvasWorkspace.tsx    # Stage/Layer/Transformer (banyak node) + marquee + skala tampilan + keyboard shortcut + drag-and-drop + penutup progres export
 │       ├── ZoomControls.tsx       # Tombol −, %, +, Fit di sudut kanvas
 │       ├── ElementRenderer.tsx    # Render 1 elemen (Text/Rect/Ellipse/Shape gambar + filter, blur, bayangan, garis tepi, mask, sudut)
 │       ├── CropOverlay.tsx        # Lapisan DOM crop: gambar utuh, lapisan gelap, jendela potong, handle siku
@@ -185,7 +207,7 @@ canvas-editor/
 │       ├── WorkspacePanel.tsx     # Ukuran, rasio, latar kanvas (+ "Terapkan ke semua halaman")
 │       ├── TemplatePanel.tsx      # Kartu template (thumbnail, jumlah halaman, lencana format)
 │       ├── TemplateThumbnail.tsx  # Thumbnail SVG satu halaman (juga dipakai strip halaman)
-│       ├── ContextualToolbar.tsx  # Kontrol elemen terpilih, dikelompokkan dan berlabel
+│       ├── ContextualToolbar.tsx  # Toolbar satu baris ala Polotno (teks / gambar / bentuk / seleksi ganda) + popover
 │       ├── ImageStylePanel.tsx    # Panel Filter | Efek | Bayangan & garis untuk gambar
 │       ├── PageStrip.tsx          # Strip halaman: thumbnail, Tambah, Duplikat, Hapus
 │       ├── HistoryControls.tsx    # Tombol Undo/Redo
@@ -198,14 +220,15 @@ canvas-editor/
 │   ├── pages.test.ts              # Halaman: store, selectors, history, adapter multi-halaman, migrasi v3 (37 tes)
 │   ├── filters-export.test.ts     # Filter, sudut membulat, setImageStyle, ZIP, urutan batch export (33 tes)
 │   ├── templates.test.ts          # Semua template dan contoh (28 tes)
+│   ├── v4-effects-selection.test.ts # Efek lintas elemen, opsi teks, auto-fit, marquee, seleksi ganda (23 tes)
 │   ├── helpers.ts                 # E(), C(), onePage(), mkPage(): jalan pintas untuk dokumen berhalaman
 │   ├── harness.ts                 # Test runner kecil (tanpa dependensi)
 │   ├── stubs/                     # Pengganti tipis zustand & uuid agar jalan di Node
 │   └── tsconfig.json
 ├── examples/
-│   ├── sample-design.json              # Contoh export format Native (v3, satu halaman)
+│   ├── sample-design.json              # Contoh export format Native (v4, satu halaman)
 │   ├── sample-design.polotno.json      # Dokumen yang sama, format Polotno
-│   ├── sample-multipage.json           # Native v3, 3 halaman (dua ukuran berbeda)
+│   ├── sample-multipage.json           # Native v4, 3 halaman (dua ukuran berbeda)
 │   ├── sample-multipage.polotno.json   # Dokumen yang sama, format Polotno, 3 halaman
 │   └── sample-effects.polotno.json     # Format Polotno: blur, garis tepi, bayangan, mask lingkaran/segitiga, crop
 ├── Dockerfile
@@ -299,7 +322,8 @@ komponen membaca/menulis langsung ke store global (pola arsitektur Polotno).
 |--------------|--------------------------|------------|
 | `pages`      | `Page[]`                 | **Dokumen**: satu halaman atau lebih (tidak pernah kosong). `Page = { id, canvas: CanvasMeta, elements: CanvasElement[] }` — tiap halaman punya ukuran, latar, dan elemen sendiri |
 | `currentPageIndex` | `number`           | Halaman yang sedang diedit; selalu indeks yang sah di `pages` |
-| `selectedId` | `string \| null`         | id elemen aktif **di halaman aktif** |
+| `selectedIds` | `string[]`              | **Semua** elemen terpilih di halaman aktif (klik, `Ctrl/Cmd`+klik, marquee), urut sesuai saat dipilih |
+| `selectedId` | `string \| null`         | **Satu-satunya** elemen terpilih, atau `null` bila tidak ada **atau lebih dari satu** yang dipilih. Yang dipakai UI satu-elemen (toolbar, crop, edit teks, copy). Selalu sama dengan `selectedIds[0]` bila `selectedIds` berisi satu |
 | `clipboard`  | `CanvasElement \| null`  | Elemen yang disalin dengan Ctrl+C; bukan bagian dokumen, tidak ikut history, dan bisa ditempel di halaman mana pun |
 | `editingId`  | `string \| null`         | id teks yang sedang diedit di overlay `<textarea>`; saat terisi, shortcut global dinonaktifkan dan node Konva disembunyikan |
 | `croppingId` | `string \| null`         | id gambar yang sedang dipangkas di overlay crop; node Konva-nya disembunyikan dan Transformer dilepas. Ikut pilihan: berganti/hilang bila yang dipilih berganti, dan dibersihkan oleh Undo/Redo, pindah halaman, hapus, muat dokumen, dan reset |
@@ -309,7 +333,7 @@ komponen membaca/menulis langsung ke store global (pola arsitektur Polotno).
 | `past`       | `HistorySnapshot[]`      | Tumpukan state sebelumnya (Undo) |
 | `future`     | `HistorySnapshot[]`      | Tumpukan state yang baru di-undo (Redo) |
 
-`selectedId`, `clipboard`, `editingId`, `croppingId`, `stageNode`, `loadRevision`, dan
+`selectedIds`, `selectedId`, `clipboard`, `editingId`, `croppingId`, `stageNode`, `loadRevision`, dan
 `exportProgress` **tidak pernah** masuk ke snapshot history — snapshot hanya berisi
 `pages` (seluruh dokumen) dan indeks halaman. (Level zoom sengaja tidak ada di store:
 itu pengaturan tampilan milik `CanvasWorkspace`, lihat "Fit-to-Screen & zoom kanvas".)
@@ -333,7 +357,9 @@ itu pengaturan tampilan milik `CanvasWorkspace`, lihat "Fit-to-Screen & zoom kan
 | `duplicatePage` | `(index?: number) => void` | Salin halaman (default: aktif) **beserta seluruh elemennya**, semuanya berid baru, tepat sesudah sumbernya; salinan ditampilkan; satu langkah undo. Indeks tidak sah = tidak berbuat apa-apa dan tidak mencatat history |
 | `deletePage` | `(index?: number) => boolean` | Hapus halaman (default: aktif); satu langkah undo. **Halaman terakhir tidak bisa dihapus** (mengembalikan `false`). Indeks tidak sah = tidak berbuat apa-apa |
 | `setCanvasMeta` | `(meta: Partial<CanvasMeta>, options?: { allPages?: boolean }) => void` | Ubah ukuran/warna latar halaman aktif (atau **semua halaman** dengan `allPages`). Ukuran dibulatkan dan dibatasi 50–4000 px, warna dinormalisasi, nilai tidak valid diabaikan; pemanggilan beruntun menjadi satu langkah undo; tanpa perubahan = tanpa langkah undo |
-| `setSelectedId` | `(id: string \| null) => void` | Set elemen aktif (tidak masuk history) |
+| `setSelectedId` | `(id: string \| null) => void` | Pilih satu elemen (atau tidak ada); tidak masuk history |
+| `setSelection` | `(ids: string[]) => void` | Pilih tepat elemen-elemen ini di halaman aktif (id yang tidak ada dan duplikat dibuang); dipakai marquee dan `Ctrl/Cmd+A`. Crop/edit teks ditutup bila elemennya tidak lagi satu-satunya yang dipilih |
+| `toggleSelected` | `(id: string) => void` | `Ctrl/Cmd`+klik: tambahkan ke seleksi, atau keluarkan bila sudah ada |
 | `setEditingId` | `(id: string \| null) => void` | Mulai/akhiri mode edit teks (tidak masuk history) |
 | `setCroppingId` | `(id: string \| null) => void` | Buka/tutup mode crop (tidak masuk history). Hanya gambar yang diterima; membuka crop juga memilih gambar itu dan menutup edit teks |
 | `setExportProgress` | `(progress: { done, total } \| null) => void` | Dipakai export semua halaman (tidak masuk history) |
@@ -344,17 +370,21 @@ itu pengaturan tampilan milik `CanvasWorkspace`, lihat "Fit-to-Screen & zoom kan
 | `setImageCrop` | `(id: string, patch: CropPatch) => void` | Tulis hasil satu gestur crop: kotak (`x, y, width, height`) **dan** `cropX/cropY/cropWidth/cropHeight` sekaligus, **satu langkah undo**. Patch yang tidak mengubah apa pun, tidak valid (NaN, ukuran ≤ 0), atau menyasar elemen bukan-gambar diabaikan tanpa membuat langkah undo |
 | `resetImageCrop` | `(id: string) => void` | Tampilkan lagi seluruh gambar pada ukuran skalanya saat ini; satu langkah undo, tidak berbuat apa-apa pada gambar yang sudah utuh |
 | `setImageStyle` | `(id: string, patch: ImageStylePatch) => void` | Ubah tampilan gambar: kecerahan, kontras, saturasi, preset, blur, sudut membulat, bayangan, garis tepi, mask. Nilai dijepit ke rentangnya, yang tidak valid diabaikan, `undefined` menghapus field. Geseran slider beruntun = satu langkah undo; patch yang tidak mengubah apa pun tidak mencatat apa pun. Hanya gambar di halaman aktif |
+| `setElementStyle` | `(id: string, patch: ElementStylePatch) => void` | Sama seperti `setImageStyle`, untuk **elemen apa pun**: `opacity` dan bayangan untuk semua tipe, garis tepi (`stroke`/`strokeWidth`) untuk teks dan bentuk (garis tepi bentuk bisa diubah tetapi tidak dihapus), dan seluruh field gambar untuk gambar. Kunci yang tidak dimiliki tipe itu diabaikan |
+| `flipImage` | `(id: string, axis: "x" \| "y") => void` | Cerminkan gambar di dalam kotaknya (`scaleX`/`scaleY` = ±1); satu langkah undo |
+| `fitToPage` | `(id: string) => void` | Skala proporsional ke ukuran terbesar yang muat di halaman, di tengah, tegak (rotasi 0); satu langkah undo; tidak berbuat apa-apa bila sudah begitu (dan untuk teks) |
 | `replaceImageSource` | `(id: string, image: { src, naturalWidth, naturalHeight }) => void` | Ganti isi gambar; posisi, rotasi, dan lebar tetap, tinggi mengikuti rasio gambar baru, crop direset; satu langkah undo |
-| `updateElement` | `(id, attrs: Partial<CanvasElement>) => void` | Update properti elemen (drag, resize, warna, teks…); perubahan beruntun di-batch jadi satu langkah undo |
+| `updateElement` | `(id, attrs: Partial<CanvasElement>) => void` | Update properti elemen (drag, resize, warna, teks…); perubahan beruntun di-batch jadi satu langkah undo. Field bernilai `undefined` **dihapus** dari elemen |
+| `updateElements` | `(changes: { id, attrs }[], batchKey: string) => void` | Beberapa elemen diubah oleh **satu** gestur (geser/ubah ukuran seleksi ganda): satu langkah undo untuk semuanya |
 | `syncMeasuredHeight` | `(id: string, height: number) => void` | Menyalin tinggi teks hasil ukur Konva ke store; **tidak** membuat langkah undo |
 | `removeElement` | `(id: string) => void` | Hapus elemen |
-| `removeSelected` | `() => void` | Hapus elemen aktif (shortcut Delete) |
-| `copySelected` | `() => boolean` | Salin elemen aktif ke `clipboard`; `false` bila tidak ada yang dipilih |
+| `removeSelected` | `() => void` | Hapus **semua** elemen terpilih (shortcut Delete) dalam satu langkah undo |
+| `copySelected` | `() => boolean` | Salin elemen aktif ke `clipboard`; `false` bila tidak ada yang dipilih **atau lebih dari satu** (seleksi ganda belum bisa disalin) |
 | `pasteClipboard` | `() => boolean` | Tempel di **halaman aktif** dengan id baru, +20/+20; `false` bila clipboard kosong |
 | `reorderElement` | `(id, "front"\|"back"\|"forward"\|"backward") => void` | Atur z-index |
-| `nudgeSelected` | `(dx: number, dy: number) => void` | Geser elemen aktif (shortcut panah) |
+| `nudgeSelected` | `(dx: number, dy: number) => void` | Geser semua elemen terpilih (shortcut panah); tahan tombol = satu langkah undo |
 | `undo` / `redo` | `() => void` | Mundur / maju satu langkah history; menampilkan halaman tempat perubahan terjadi dan menyetel ulang seleksi |
-| `exportToJSON` | `(format?: "kusuka"\|"polotno") => Promise<{ json: string; warnings: string[] }>` | Serialize **seluruh dokumen (semua halaman) ke satu berkas**; default `"kusuka"` (v3). **Async**: gambar `blob:` dibaca dan disematkan sebagai `data:` URL |
+| `exportToJSON` | `(format?: "kusuka"\|"polotno") => Promise<{ json: string; warnings: string[] }>` | Serialize **seluruh dokumen (semua halaman) ke satu berkas**; default `"kusuka"` (v4). **Async**: gambar `blob:` dibaca dan disematkan sebagai `data:` URL |
 | `loadFromJSON` | `(data: string \| unknown) => LoadResult` | Muat dokumen **format apa pun** (string atau objek); mengganti semua halaman, menampilkan halaman pertama; satu langkah undo |
 | `reset` | `() => void` | Kosongkan dokumen menjadi **satu halaman kosong** (satu langkah undo) |
 
@@ -870,8 +900,9 @@ Aturannya (`src/lib/polotnoEffects.ts`):
 - Filter bernama lain di `filters` (blur, brightness, noise, …) **diabaikan dan
   dilaporkan satu kali** (jumlah elemen); `contrast`/`saturation` saja tidak
   menimbulkan peringatan.
-- Yang masih belum didukung tetap diperingatkan: `opacity` < 1, `maskSrc` (mask SVG),
-  filter lain. Blur, bayangan, dan filter warna pada **teks dan bentuk** juga belum.
+- Yang masih belum didukung tetap diperingatkan: `maskSrc` (mask SVG), filter lain.
+  Blur dan filter warna pada **teks dan bentuk** juga belum. (`opacity` dan bayangan
+  didukung untuk semua tipe sejak v8, lihat "Efek lintas elemen".)
 
 Arah sebaliknya (`imageEffectsToPolotno`): hanya efek yang aktif yang ditulis;
 gambar tanpa efek menghasilkan berkas yang sama persis seperti sebelumnya. Pulang-pergi
@@ -934,6 +965,173 @@ klik harus mengikuti mask. Bila Anda tetap ingin `Group`, perubahannya terlokali
 di `ImageNode`.
 
 ---
+
+---
+
+## Efek lintas elemen (teks, bentuk, gambar)
+
+Sampai v7, transparansi, bayangan, dan garis tepi hanya milik `ImageElement`. Di v8
+field-field ini pindah ke **`BaseElement`** (`src/types/editor.ts`), sehingga berlaku
+untuk `TextElement`, `ShapeElement`, dan `ImageElement`:
+
+| Field | Tipe | Arti | Polotno |
+|---|---|---|---|
+| `opacity` | `0..1` | transparansi seluruh elemen; tidak ada = 1 | `opacity` |
+| `shadowColor` | `#rrggbb` | warna bayangan; tidak ada = tanpa bayangan | `shadowEnabled: true` + `shadowColor` |
+| `shadowBlur` | px | kelembutan bayangan | `shadowBlur` |
+| `shadowOffsetX` / `shadowOffsetY` | px | geser bayangan | sama |
+| `shadowOpacity` | `0..1` | dikalikan ke warna bayangan | `shadowOpacity` × alfa warna |
+| `stroke` / `strokeWidth` | `#rrggbb` / px | **teks**: garis tepi huruf (opsional); **bentuk**: garis tepi (wajib, seperti sebelumnya); **gambar**: bingkai (`borderColor`/`borderSize` di Polotno) | teks & bentuk: `stroke`/`strokeWidth` |
+
+**Penggambaran** (`ElementRenderer.tsx` — komponen yang dirender oleh
+`CanvasWorkspace.tsx`; permintaan menyebut `CanvasWorkspace.tsx`, tetapi node Konva tiap
+elemen dibuat di `ElementRenderer`, jadi di sanalah atribut efek dipasang):
+
+- `Konva.Text`: `opacity`, `shadow*`, `stroke`/`strokeWidth` dengan
+  `fillAfterStrokeEnabled` (garis di belakang huruf, tidak memakan bentuk hurufnya).
+- `Rect` / `Ellipse`: `opacity` dan `shadow*` (garis tepinya sudah ada sejak v1).
+- Gambar (`Shape` dengan `sceneFunc`): `opacity` di node; bayangan tetap digambar oleh
+  `drawPicture` seperti sebelumnya (perlu siluet untuk gambar bermask).
+- Atribut bayangan dibuat oleh satu fungsi (`shadowProps(resolveShadow(el))`), jadi
+  aturan "bayangan yang tidak terlihat dimatikan" (tanpa warna, opasitas 0, atau tanpa
+  blur dan tanpa geser) sama untuk semua tipe.
+
+**Mengubahnya:** aksi store `setElementStyle(id, patch)` (lihat tabel Actions). Patch
+divalidasi oleh `applyElementStylePatch` di `lib/imageStyle.ts`: angka dijepit, warna
+harus terbaca, `undefined` menghapus field, dan patch yang tidak mengubah apa pun tidak
+membuat langkah undo. Di UI: menu **✦ Efek** pada toolbar teks/bentuk (Transparansi,
+Bayangan + warna/blur/geser/kepekatan, dan untuk teks Garis tepi huruf), dan slider
+**Transparansi** baru di panel Filter & Efek gambar.
+
+**Adapter Polotno:** `readPolotnoCommonEffects` / `shadowToPolotno` di
+`lib/polotnoEffects.ts` dipakai untuk **semua** tipe elemen. Bayangan dibaca hanya bila
+`shadowEnabled === true` (aturan yang sama dengan efek gambar), `opacity < 1` disalin, dan
+keduanya **tidak lagi masuk peringatan** "efek yang belum didukung". Yang masih dilaporkan
+untuk teks/bentuk: blur, filter warna (brightness/sepia/grayscale), latar teks
+(`backgroundEnabled`), teks melengkung (`curveEnabled`), garis putus-putus (`dash`),
+dekorasi selain underline/line-through, dan `textTransform` selain upper/lower.
+
+## Toolbar kontekstual ala Polotno
+
+`src/components/ContextualToolbar.tsx`. Satu baris kontrol ringkas untuk elemen yang
+dipilih, lalu menu **☰ Posisi** (urutan lapisan) dan **Hapus** di ujung kanan. Pilihan
+yang butuh ruang dibuka dalam **popover** kecil di bawah tombolnya (tutup dengan `Esc`
+atau klik di luar). Setiap kontrol punya `data-toolbar-action` untuk pengujian browser.
+
+**Teks** (`data-toolbar="text"`), kiri ke kanan:
+
+| Kontrol | `data-toolbar-action` | Menulis |
+|---|---|---|
+| Kotak warna | `text-color` | `fill` |
+| Pilihan font | `font-family` | `fontFamily` (font berkas impor yang tidak ada di daftar tetap ditampilkan) |
+| Ukuran dengan ▲▼ | `font-size` | `fontSize` (1–500) |
+| ⤡ Auto-fit | `auto-fit` | `autoFit` (lihat "Auto-fit teks") |
+| **B** / *I* | `bold` / `italic` | `fontStyle` (`normal` / `bold` / `italic` / `bold italic`) |
+| U / S | `underline` / `strikethrough` | `textDecoration` (`underline`, `line-through`, atau keduanya) |
+| Perataan (satu tombol, bersiklus kiri → tengah → kanan → justify, seperti Polotno) | `align` | `align` |
+| •≡ / 1≡ | `list-bullet` / `list-number` | `listType` |
+| ↕ Spasi | `spacing` | `letterSpacing` (−20 %…100 % ukuran huruf), `lineHeight` (0,5–3×) |
+| AA / aa | `uppercase` / `lowercase` | `textTransform` |
+| ✦ Efek | `effects` | `opacity`, bayangan, garis tepi huruf |
+
+**Gambar** (`data-toolbar="image"`): **⧉ Pangkas** / **Reset** (`crop`, `reset-crop`),
+**⇋ Balik** (`flip` → `flip-x` / `flip-y`, aksi `flipImage`), **✦ Efek** (`style-panel`,
+membuka panel Filter & Efek: filter warna, transparansi, blur, sudut, bayangan, garis tepi),
+**⤢ Pas halaman** (`fit-page`, aksi `fitToPage`), **◐ Mask** (`mask`, Persegi / Lingkaran /
+Segitiga), dan **Ganti**.
+
+**Bentuk** (`data-toolbar="shape"`): warna isi (`fill-color`), warna garis tepi
+(`stroke-color`), tebal garis dengan ▲▼ (`stroke-width`), sudut membulat untuk persegi
+(`corner-radius`), dan **✦ Efek** (transparansi dan bayangan).
+
+**Seleksi ganda** (`data-toolbar="multi"`): jumlah elemen terpilih, petunjuk, **Batal
+pilih**, dan **Hapus N**.
+
+Field teks baru (semuanya opsional; tidak ada = mati):
+
+- `textDecoration`, `letterSpacing` (pecahan ukuran huruf, seperti Polotno; Konva
+  menerima px, jadi renderer mengalikannya dengan ukuran huruf yang digambar),
+  `textTransform` (**hanya tampilan**: `text` tetap menyimpan huruf yang diketik),
+  `listType` (penanda `•` atau `1.` di depan tiap paragraf; baris kosong tidak diberi
+  nomor), `stroke`/`strokeWidth`, `autoFit`.
+- Teks yang digambar dibentuk oleh `displayText()` (`lib/textOptions.ts`). Di Polotno,
+  `textDecoration`, `letterSpacing`, `textTransform`, `stroke`, `strokeWidth`, dan
+  `align: "justify"` punya field sendiri; `listType` dan `autoFit` tidak, jadi ditulis di
+  `custom` (bersama `custom.source`) dan dibaca kembali dari sana.
+
+Keterbatasan yang diketahui: baris daftar yang terbungkus tidak menjorok di bawah
+penanda (Konva tidak punya *hanging indent*); `<textarea>` edit teks menampilkan teks apa
+adanya, tanpa penanda daftar; di layar sempit toolbar dibungkus menjadi dua baris.
+
+## Seleksi ganda: kotak seret & Ctrl/Cmd+klik
+
+**State:** `selectedIds: string[]` adalah sumber kebenaran seleksi; `selectedId` adalah
+"satu-satunya yang dipilih" (atau `null`). Semua aksi yang mengganti halaman, Undo/Redo,
+memuat dokumen, dan reset mengosongkan keduanya (`NO_SELECTION`), seperti sebelumnya.
+
+**Marquee** (`CanvasWorkspace.tsx`, logika di `lib/selection.ts`):
+
+1. `onMouseDown` pada `<Stage>` yang mengenai area kosong (target = Stage) mencatat titik
+   awal dalam **piksel desain** (posisi kursor dibagi zoom, lewat `clientToDesign`).
+2. `mousemove` / `mouseup` dipasang di `window`, sehingga kotak tetap mengikuti kursor
+   walau keluar dari halaman. Gerakan di bawah 3 px layar dianggap klik.
+3. Setiap gerakan: kotak semi-transparan (biru, garis putus-putus 1 px layar pada zoom
+   berapa pun, `listening={false}`) digambar di atas halaman, lalu
+   `elementsInMarquee()` menghitung **perpotongan** kotak dengan setiap elemen halaman
+   aktif dan hasilnya langsung menjadi seleksi (Transformer ikut berubah selagi diseret).
+   Perpotongan diuji tepat dengan *separating axis theorem*: elemen yang diputar hanya
+   terpilih bila kotaknya yang miring benar-benar tersentuh, bukan sekadar kotak
+   pembatasnya. Menyentuh tepi sudah dihitung.
+4. Mulai menyeret sambil menahan `Ctrl`/`Cmd`/`Shift` **menambah** ke seleksi yang ada.
+   Klik tanpa geser di area kosong membatalkan seleksi (seperti dulu). Sentuhan (*touch*)
+   tidak membuat marquee: ketuk area kosong membatalkan seleksi.
+
+**Ctrl/Cmd+klik** (juga `Shift`+klik): `ElementRenderer` meneruskan tombol pengubah dari
+event klik Konva; dengan pengubah, `toggleSelected(id)` menambah atau mengeluarkan elemen
+tanpa membatalkan yang lain. Klik biasa memilih elemen itu saja.
+
+**Transformer:** semua node terpilih dipasang sekaligus (`transformer.nodes([...])`),
+kecuali node yang sedang diedit/dipangkas. Dengan lebih dari satu node hanya jangkar sudut
+yang aktif (`keepRatio`), sehingga setiap elemen mempertahankan bentuknya. Menyeret salah
+satu node terpilih memindahkan semuanya (perilaku bawaan Transformer Konva).
+
+**Satu gestur = satu langkah undo:** di akhir drag/transform, `CanvasWorkspace` membaca
+**semua** node terpilih dan menulisnya dengan satu `updateElements(...)`; Konva memanggil
+event itu pada tiap node, tetapi panggilan berikutnya menemukan angka yang sudah tertulis
+(dan skala yang sudah kembali 1), jadi tidak mengubah apa pun lagi. Skala dimasukkan ke
+ukuran oleh `bakeTransform()` (`lib/transform.ts`): gambar tetap proporsional, bentuk
+lebar × tinggi, teks biasa hanya lebar — **kecuali** saat diskalakan rata dari sudut
+seleksi ganda, ukuran hurufnya ikut membesar/mengecil (seperti Polotno) — dan teks
+auto-fit lebar × tinggi.
+
+Panah (geser 1/10 px), `Delete`, `Ctrl/Cmd+A` (pilih semua di halaman), dan `Esc`
+(batal pilih) bekerja pada seluruh seleksi. `Ctrl/Cmd+C` hanya menyalin bila **satu**
+elemen yang dipilih; menyalin seleksi ganda belum didukung.
+
+## Auto-fit teks (kecilkan otomatis)
+
+Tombol **⤡** di toolbar teks menyalakan `autoFit: true`. Sejak saat itu:
+
+- Kotak teks punya **tinggi tetap** milik pengguna (semua jangkar Transformer aktif,
+  termasuk atas/bawah). Tinggi awalnya adalah tinggi teks saat tombol ditekan, jadi tidak
+  ada yang berubah sampai kotaknya diperkecil atau teksnya diperpanjang.
+- Teks digambar dengan **ukuran huruf terbesar, maksimal `fontSize`**, yang muat:
+  jumlah baris × ukuran × `lineHeight` ≤ tinggi kotak, **dan** tidak ada satu kata pun
+  yang lebih lebar dari kotak (tanpa aturan kedua Konva akan memotong kata di tengah,
+  huruf per huruf). `fontSize` yang disimpan tidak pernah berubah — itu batas atas
+  pilihan pengguna; hanya ukuran yang digambar yang mengecil. Font, `lineHeight`, dan
+  spasi huruf (pecahan ukuran huruf) ikut proporsional.
+- Pencarian ada di `lib/textFit.ts` (murni, diuji di Node): `wrapLines()` meniru
+  pembungkusan kata Konva (`wrap: "word"`), `fitFontSize()` mencari biner pada kelipatan
+  0,5 px, berhenti di 4 px bila teks tetap tidak muat. Pengukurnya dari `ElementRenderer`:
+  satu `Konva.Text` tersembunyi yang `measureSize()`-nya adalah `measureText` kanvas
+  dengan string font yang sama persis dengan yang dipakai Konva untuk menggambar; spasi
+  huruf ditambahkan per celah antarhuruf seperti Konva.
+- `<textarea>` edit teks memakai ukuran yang benar-benar digambar (dibaca dari node
+  Konva lewat `stage.findOne("#id")`), jadi teks tidak melompat saat mulai diedit.
+- Di Polotno, `autoFit` ditulis sebagai `custom.autoFit` dan `fontSize` yang ditulis adalah
+  **batas atas** pengguna. Polotno sendiri tidak membaca `custom.autoFit`, jadi di Polotno
+  teks itu bisa tampil lebih besar dari di editor ini (lihat "Belum diuji").
 
 ---
 
@@ -1153,7 +1351,7 @@ gagal), dan export paralel (satu Stage = satu halaman sekali waktu).
 
 ---
 
-## Skema Dokumen JSON Native (v3)
+## Skema Dokumen JSON Native (v4)
 
 Format bawaan (`exportToJSON("kusuka")`), didefinisikan di `src/types/editor.ts`.
 **Satu berkas memuat seluruh halaman.**
@@ -1165,7 +1363,7 @@ halaman tempat elemen berada.
 
 ```jsonc
 {
-  "version": 3,                 // versi skema (lihat "Migrasi")
+  "version": 4,                 // versi skema (lihat "Migrasi")
   "pages": [
     {
       "id": "page-1",           // unik di seluruh dokumen
@@ -1189,10 +1387,23 @@ halaman tempat elemen berada.
           "fontSize": 48,
           "fontFamily": "Inter, sans-serif",
           "fill": "#111111",
-          "align": "center",        // "left" | "center" | "right"
+          "align": "center",        // "left" | "center" | "right" | "justify"
           "fontStyle": "bold",      // "normal" | "bold" | "italic" | "bold italic"
           "lineHeight": 1.2,        // kelipatan fontSize
-          "widthTolerance": 10      // OPSIONAL: px yang ditambahkan ke width saat impor Polotno (lihat "Toleransi lebar kotak teks")
+          "widthTolerance": 10,     // OPSIONAL: px yang ditambahkan ke width saat impor Polotno (lihat "Toleransi lebar kotak teks")
+
+          // -- opsi teks v4, semuanya OPSIONAL (tidak ada = mati) --
+          "textDecoration": "underline",        // "underline" | "line-through" | "underline line-through"
+          "letterSpacing": 0.05,                // PECAHAN fontSize (0.05 = 5%), seperti Polotno
+          "textTransform": "uppercase",         // "uppercase" | "lowercase" — hanya tampilan
+          "listType": "bullet",                 // "bullet" | "number"
+          "autoFit": true,                      // tinggi kotak tetap, ukuran huruf mengecil bila perlu
+          "stroke": "#000000", "strokeWidth": 2, // garis tepi huruf
+
+          // -- efek v4 untuk SEMUA tipe elemen, OPSIONAL --
+          "opacity": 0.9,                       // 0..1
+          "shadowColor": "#000000", "shadowBlur": 12,
+          "shadowOffsetX": 4, "shadowOffsetY": 4, "shadowOpacity": 0.45
         },
         {
           "id": "uuid",
@@ -1239,17 +1450,23 @@ Contoh lengkap: [`examples/sample-design.json`](./examples/sample-design.json) (
 dan [`examples/sample-multipage.json`](./examples/sample-multipage.json) (tiga halaman,
 dua ukuran berbeda).
 
-### Migrasi v1 → v2 → v3
+### Migrasi v1 → v2 → v3 → v4
 
-- **v3** (sekarang): `{ version: 3, pages: [...] }`.
+- **v4** (sekarang): bentuk sama dengan v3; yang baru hanya field **opsional** —
+  `opacity` dan `shadow*` pada semua tipe elemen, serta `stroke`/`strokeWidth`,
+  `textDecoration`, `letterSpacing`, `textTransform`, `listType`, `autoFit`, dan
+  `align: "justify"` pada teks.
+- **v3**: `{ version: 3, pages: [...] }`. Dibuka **apa adanya dan tanpa peringatan**
+  (tidak ada yang perlu diubah); disimpan ulang sebagai v4. Editor v3 akan menolak berkas
+  v4 (versi lebih baru), sehingga efek baru tidak pernah hilang diam-diam di editor lama.
 - **v2**: `{ version: 2, canvas, elements }` — satu kanvas dan satu larik elemen.
   Dibuka sebagai **dokumen satu halaman** (`id: "page-1"`) dan **tanpa peringatan**:
   tidak ada yang hilang, jadi tidak ada yang perlu dilaporkan. Berkas v2 yang disimpan
-  ulang menjadi v3.
+  ulang menjadi v4.
 - **v1**: seperti v2, tetapi **lingkaran disimpan berdasarkan titik tengahnya**
   (kebiasaan `Circle` di Konva) sementara elemen lain berdasarkan sudut kiri-atas.
   Dimigrasi otomatis saat dimuat: titik tengah lingkaran dipertahankan persis, juga
-  pada lingkaran yang diputar, lalu menjadi satu halaman v3; pengguna melihat
+  pada lingkaran yang diputar, lalu menjadi satu halaman; pengguna melihat
   peringatan "posisi N lingkaran dimigrasi". Field yang belum ada di v1 diisi default
   (`fontStyle: "normal"`, `lineHeight: 1`, `cornerRadius: 4` untuk persegi).
 
@@ -1267,7 +1484,11 @@ filter dan efek gambar divalidasi — angka dibatasi ke rentangnya, warna harus 
 yang tidak valid dibuang, bukan membuat gambar gagal digambar), **id elemen dan id halaman
 kosong atau kembar (juga antarhalaman) diganti id baru**, dan elemen yang tidak valid
 dilewati dengan peringatan. `pages` kosong menjadi **satu halaman kosong** disertai
-peringatan. Berkas bertanda `version` lebih baru dari yang didukung editor (4 ke atas)
+peringatan. Field v4 divalidasi dengan cara yang sama: `opacity` dijepit ke 0..1 (nilai 1 tidak
+disimpan), bayangan hanya diterima dengan warna yang terbaca, `letterSpacing` dijepit ke
+−0,2..1, `listType`/`textTransform`/`textDecoration` hanya nilai yang dikenal, garis tepi
+huruf hanya bila `strokeWidth > 0` dan warnanya terbaca. Berkas bertanda `version` lebih
+baru dari yang didukung editor (5 ke atas)
 **ditolak** dengan pesan yang jelas.
 
 ---
@@ -1283,9 +1504,9 @@ diuji di Node biasa.
 |---|---|
 | `detectFormat(data)` | `"kusuka"` untuk native v1/v2 (`canvas` + `elements`) dan **v3** (`pages` berisi halaman `canvas` + `elements`, atau `version: 3` dengan `pages` kosong); `"polotno"` bila ada `pages[]` berisi `children`; selain itu `"unknown"` |
 | `parseDocument(input)` | Pintu masuk tunggal: menerima string/objek **format apa pun**, mendeteksi formatnya, mengembalikan dokumen native tervalidasi + `warnings`. Dipakai `loadFromJSON`, tombol Import, dan galeri template |
-| `convertPolotnoToKusuka(doc, { pageIndex? })` | `{ pages: [{ children }] }` → `CanvasDocument` native v3. **Seluruh `pages[]` diimpor**, berurutan, masing-masing dengan ukuran dan latarnya. `pageIndex` (opsional) mengimpor satu halaman saja; indeks yang tidak ada menghasilkan satu halaman kosong |
+| `convertPolotnoToKusuka(doc, { pageIndex? })` | `{ pages: [{ children }] }` → `CanvasDocument` native v4. **Seluruh `pages[]` diimpor**, berurutan, masing-masing dengan ukuran dan latarnya. `pageIndex` (opsional) mengimpor satu halaman saja; indeks yang tidak ada menghasilkan satu halaman kosong |
 | `convertKusukaToPolotno(doc)` | `CanvasDocument` → dokumen Polotno dengan **semua halaman** |
-| `sanitizeKusukaDocument(raw)` | Validasi + migrasi file native (v1/v2 → satu halaman v3; v3 per halaman) |
+| `sanitizeKusukaDocument(raw)` | Validasi + migrasi file native (v1/v2 → satu halaman; v3/v4 per halaman), hasilnya selalu v4 |
 
 ### Import: Polotno → native
 
@@ -1298,7 +1519,9 @@ diuji di Node biasa.
 | teks: `fill` (cadangan: `color`) | `fill` |
 | teks: `fontFamily` (`"Georgia"`) | `fontFamily` (`"Georgia, serif"`) |
 | teks: `fontWeight` ≥ 600/`"bold"` + `fontStyle: "italic"` | `fontStyle` (`"bold italic"`, …) |
-| teks: `align` (`justify` → `left`; default Polotno `center`) | `align` |
+| teks: `align` (termasuk `justify` sejak v8; default Polotno `center`) | `align` |
+| teks: `stroke` + `strokeWidth`, `textDecoration`, `letterSpacing`, `textTransform` (upper/lower), `custom.listType`, `custom.autoFit` | field bernama sama (v8) — lihat "Toolbar kontekstual ala Polotno" |
+| semua tipe: `opacity`, `shadowEnabled` + `shadow*` | `opacity`, `shadow*` (v8) — lihat "Efek lintas elemen" |
 | teks: `lineHeight` (default 1.2); `height` 0 | `lineHeight`; tinggi dihitung `fontSize × lineHeight` |
 | teks: `text` berisi HTML (`<p>`, `<span>`, `</p><p>`, `<br>`) | `text` polos, baris dipisah `\n` — lihat "Pembersih teks HTML" |
 | teks: `width` | `width + 10`, `x` digeser mundur menurut `align`, `widthTolerance: 10` — lihat "Toleransi lebar kotak teks" |
@@ -1524,10 +1747,12 @@ maupun export.
 - Latar halaman berupa gambar atau gradien (halaman memakai putih).
 - Elemen bertipe lain (`video`, `gif`, …), **grup** (`group`; lihat di atas), dan
   bentuk selain persegi/lingkaran (bintang, segitiga, …) dilewati.
-- Efek: `opacity` < 1, bayangan, blur, dan filter warna **pada teks dan bentuk**, stroke
-  teks, `letterSpacing`, `textDecoration`, `textTransform`, `dash` (dan pada
+- Efek: blur dan filter warna **pada teks dan bentuk**, latar teks
+  (`backgroundEnabled`), teks melengkung (`curveEnabled`), dekorasi selain
+  underline/line-through, `textTransform` selain upper/lower, `dash` (dan pada
   gambar/SVG: `maskSrc` serta filter selain kontras/saturasi). Elemennya tetap diimpor,
-  tampilannya bisa sedikit berbeda.
+  tampilannya bisa sedikit berbeda. (Sejak v8 `opacity`, bayangan, garis tepi teks,
+  `letterSpacing`, underline/coret, dan huruf besar/kecil **dibawa** tanpa peringatan.)
 - Pada gambar/SVG, filter warna (kecerahan, kontras, saturasi, hitam-putih, sepia),
   sudut membulat, blur, garis tepi, bayangan, dan mask lingkaran/segitiga **dibawa**
   (tanpa peringatan). Hanya `clipSrc` dengan bentuk lain, atau yang bentuknya tidak
@@ -1577,7 +1802,8 @@ sebagai `type: "text"` (warna di `fill`, tidak ada properti `color`), bentuk seb
 (`blurEnabled`/`blurRadius`, `borderSize`/`borderColor`, `shadowEnabled`/`shadow*`,
 `clipSrc`, `brightnessEnabled`/`brightness`, `grayscaleEnabled`/`sepiaEnabled`,
 `filters`, dan `custom.filterPreset` untuk preset tanpa padanan), serta nilai default
-Polotno (`opacity: 1`, `visible: true`, dst.) ditulis eksplisit. Gambar yang berasal dari
+Polotno (`visible: true`, dst.) ditulis eksplisit; `opacity` adalah transparansi elemen
+(1 bila tidak diatur), dan bayangan teks/bentuk ditulis seperti bayangan gambar. Gambar yang berasal dari
 upload sudah berupa `data:` URL pada saat ini (lihat "Upload gambar"), jadi file
 Polotno hasil export tetap utuh — di **semua** halaman.
 
@@ -1711,10 +1937,15 @@ Setiap elemen sebaiknya punya `id` unik (adapter membuatkan id bila kosong atau 
 | Seret berkas gambar dari desktop ke kanvas | Sisipkan gambar di posisi kursor dilepas |
 | `Enter` / `Esc` / klik di luar | (saat edit) simpan dan selesai |
 | `Shift + Enter` | (saat edit) baris baru |
-| `Delete` / `Backspace` | Hapus elemen terpilih (nonaktif saat edit teks) |
-| `↑ ↓ ← →` | Geser elemen terpilih 1px |
+| `Delete` / `Backspace` | Hapus **semua** elemen terpilih (nonaktif saat edit teks) |
+| `↑ ↓ ← →` | Geser elemen terpilih 1px (seleksi ganda ikut semua) |
 | `Shift + ↑ ↓ ← →` | Geser elemen terpilih 10px |
-| `Ctrl/Cmd + C` | Salin elemen terpilih |
+| Seret di area kosong halaman | Kotak seleksi (marquee): pilih semua yang bersinggungan |
+| `Ctrl/Cmd/Shift` + seret di area kosong | Marquee yang **menambah** ke seleksi |
+| `Ctrl/Cmd + klik` (atau `Shift + klik`) elemen | Tambah/keluarkan elemen dari seleksi |
+| `Ctrl/Cmd + A` | Pilih semua elemen di halaman aktif |
+| `Esc` | Batalkan seleksi |
+| `Ctrl/Cmd + C` | Salin elemen terpilih (hanya bila satu elemen yang dipilih) |
 | `Ctrl/Cmd + V` | Tempel elemen (+20,+20) |
 | `Ctrl/Cmd + Z` | Undo |
 | `Ctrl/Cmd + Shift + Z` / `Ctrl/Cmd + Y` | Redo |
@@ -1783,7 +2014,7 @@ npm install
 npm test
 ```
 
-`npm test` menjalankan **tujuh berkas** di `tests/` lewat [`tsx`](https://tsx.is/)
+`npm test` menjalankan **delapan berkas** di `tests/` lewat [`tsx`](https://tsx.is/)
 (devDependency), **tanpa browser dan tanpa Next.js** — butuh Node 20+ (memakai
 `Blob`, `URL.createObjectURL`, dan `fetch(blob:)` bawaan Node; diuji pada Node 22). Zustand dan uuid
 diganti stub tipis di `tests/stubs/` lewat `tests/tsconfig.json`, dengan kontrak
@@ -1793,16 +2024,50 @@ diganti stub tipis di `tests/stubs/` lewat `tests/tsconfig.json`, dengan kontrak
 
 | Berkas | Isi | Jumlah |
 |---|---|---|
-| `tests/core.test.ts` | warna, font, deteksi format (native v1/v2/v3 vs Polotno), adapter dua arah, **migrasi v1 → v2 → v3** (v2 menjadi satu halaman tanpa peringatan, versi 4 ditolak), `parseDocument`, store (history, clipboard, JSON, `editingId`) | 22 |
+| `tests/core.test.ts` | warna, font, deteksi format (native v1/v2/v3 vs Polotno), adapter dua arah, **migrasi v1 → v2 → v3** (v2 menjadi satu halaman tanpa peringatan, v3 dibaca sebagai v4, versi 5 ditolak), `parseDocument`, store (history, clipboard, JSON, `editingId`) | 22 |
 | `tests/media-workspace.test.ts` | aturan ukuran kanvas & rencana export, pencatat URL objek, `addImageElement`/`replaceImageSource`, **revoke berbasis referensi** (hapus, ganti, Undo, pemangkasan history, clipboard — kini menelusuri semua halaman), gestur gambar = satu langkah undo, `setCanvasMeta`, penyematan `blob:` → `data:` saat export (semua halaman), adapter (struktur bertingkat, `pageIndex`, **tanpa `pageIndex` setiap halaman diimpor dengan ukurannya sendiri**, `color`/`fill`, titik jangkar, crop, gambar, grup) | 28 |
 | `tests/templates.test.ts` | registry (id unik, 7 template Polotno ada), **tiap template**: termuat **tanpa peringatan**, warna `#rrggbb`, id/zIndex unik per halaman dan id unik di seluruh dokumen, native ↔ Polotno tanpa kehilangan data; jumlah halaman dan ukuran per halaman tiap berkas Polotno; efek gambar Katalog produk; contoh satu dan tiga halaman | 28 |
 | `tests/image-tools.test.ts` | **crop** (pecahan → piksel asli; tepi/sudut; batas gambar dan ukuran minimal; gambar dirotasi dan dicerminkan; geser; reset; *property test* 400 putaran: skala gambar tetap dan piksel yang terlihat tetap di tempatnya), **drop** (hanya seretan berkas, `files[0]`, kursor → koordinat desain pada berbagai zoom, drop di luar kanvas), store (`addImageElement` dengan `at`, `setImageCrop` = satu langkah undo, `resetImageCrop`, `croppingId` mengikuti pilihan), **efek** (hanya efek yang terlihat yang aktif, konfigurasi blur/cache, urutan `cache → filters → blurRadius`), `drawPicture` dengan mask/garis/bayangan (urutan panggilan konteks), deteksi mask, `colorAlpha`, adapter (blur, border, shadow, SVG, mask dikenali/tidak dikenali, peringatan yang tersisa, pulang-pergi), validasi file native, dan contoh `sample-effects.polotno.json` tanpa peringatan | 41 |
 | `tests/vector-text-view.test.ts` | `cleanPolotnoText` (paragraf, `<br>`, baris kosong, entitas, teks polos dengan `<`/`>`, atribut berisi `>`), teks HTML lewat adapter + peringatan, SVG (impor, ekspor `svg`, `colorsReplace` data URI/base64/tautan), flip dan skala negatif (*property test* 36 kombinasi rotasi × skala), toleransi lebar teks (per `align`, rotasi, bolak-balik tanpa membengkak), `fitZoom`/`stepZoom`/`scaledSize`, `loadRevision`, export bebas zoom dengan Stage palsu (termasuk gagal dan batas 8192 px), `drawPicture` | 35 |
 | `tests/pages.test.ts` | **halaman**: `createBlankPage`, `duplicatePageData` (id baru untuk halaman dan semua elemen), indeks (jepit, validasi, setelah hapus), selectors; store — satu halaman awal, `addPage` (setelah halaman aktif, ukuran diwariskan), `duplicatePage` (id baru, indeks buruk tidak mencatat history), `deletePage` (halaman terakhir dilindungi, undo), **`goToPage` menyetel ulang seleksi/edit/crop**, aksi elemen hanya menyentuh halaman aktif, clipboard lintas halaman, **gestur di halaman 2 tetap satu langkah undo dan Undo membawa kembali ke halaman 2**, `setCanvasMeta` (`allPages`), export/load JSON semua halaman (native dan Polotno), berkas buruk tidak mengubah apa pun; adapter — dokumen banyak halaman pulang-pergi, ukuran halaman `"auto"` vs angka, urutan tumpukan per halaman, **seluruh halaman diimpor**, id unik antarhalaman, `pages` kosong, latar gambar, deteksi v3, migrasi v1/v2 → v3, versi lebih baru ditolak, idempotensi v3 | 37 |
+| `tests/v4-effects-selection.test.ts` | **v8**: `resolveOpacity`/`resolveShadow`; `applyElementStylePatch` per tipe (kunci gambar diabaikan pada teks, garis tepi bentuk tidak bisa dihapus, objek sama = tanpa langkah undo); opsi teks (dekorasi, `displayText` dengan huruf besar/kecil dan penomoran, `readTextOptions` native vs `custom` Polotno, nilai buruk dibuang); **adapter**: opacity dan bayangan teks/bentuk disalin tanpa peringatan, bayangan mati tidak dibaca, stroke/spasi/underline/case/justify teks disalin, yang masih tak didukung tetap dilaporkan, **semua field v4 pulang-pergi tanpa kehilangan**, validasi berkas native v4; **auto-fit** (bungkus kata, kata kepanjangan, ukuran terbesar yang muat pada kelipatan 0,5, batas bawah, spasi huruf proporsional); **marquee** (arah seret, kotak berotasi diuji tepat, menyentuh = kena, mode menambah); `bakeTransform`; `fitElementToPage`; **store**: `setSelection`/`toggleSelected`, seleksi ganda digeser dan dihapus sebagai satu langkah undo, `updateElements`, `undefined` menghapus field, seleksi direset oleh pindah halaman/Undo/elemen baru, `setElementStyle`, `flipImage`, `fitToPage` | 23 |
 | `tests/filters-export.test.ts` | **filter**: matriks identitas, kecerahan/kontras/saturasi angka demi angka, preset lebih dulu lalu slider, `multiplyMatrices`, `filterKey` dan batas ukuran salinan; `cornerRadius` dan filter di `resolveImageEffects`; `applyImageStylePatch` (jepit, bulatkan, abaikan nilai buruk, objek sama = tanpa langkah undo, `undefined` menghapus); `setImageStyle` (satu geseran = satu langkah undo, hanya gambar di halaman aktif); `drawPicture` dengan sudut membulat (urutan klip, jari-jari dijepit, bayangan di luar bentuk, area klik); **Polotno** (`brightness`, `filters.contrast/saturation`, hitam-putih/sepia, filter tak dikenal dilaporkan sekali, preset di `custom`, `cornerRadius` di bawah mask tetap ditulis, pulang-pergi); validasi file native; **ZIP** (`crc32` nilai standar, `dataUrlToBytes`, struktur arsip, arsip kosong, cap waktu DOS); **batch** (urutan render, progres, halaman awal dipulihkan, galat dilempar setelah dipulihkan, nama berkas bernomor, `waitUntil`) | 33 |
 
-Total **224 tes** (22 + 28 + 28 + 41 + 35 + 37 + 33); semuanya lulus pada saat README ini
-ditulis (Node 22, tsx 4.23).
+Total **247 tes** (22 + 28 + 28 + 41 + 35 + 37 + 33 + 23); semuanya lulus pada saat README
+ini ditulis (Node 24 di container `node:24-slim`, karena mesin pengembangan v8 tidak punya
+Node terpasang). `npx tsc --noEmit` juga bersih.
+
+Cara menjalankannya tanpa Node di mesin sendiri (dependensi dipasang di *volume* Docker,
+folder `node_modules/` di proyek tidak disentuh):
+
+```bash
+docker run --rm -v "$PWD:/app" -v kusuka_nm:/app/node_modules -w /app node:24-slim sh -c "npm install && npm test && npx tsc --noEmit"
+```
+
+### Diuji di browser dengan Konva asli (v8)
+
+Untuk pertama kalinya aplikasi dijalankan utuh: `next dev` di container `node:24-slim`
+(Konva 9, react-konva 18, Next 14.2.5 asli dari npm), dibuka di Chromium pada viewport
+1440×900. Yang diperiksa langsung pada node Konva (`Konva.stages[0]`) dan di layar:
+
+- **Toolbar teks** muat dalam **satu baris** pada lebar itu; B, U, S, AA, perataan, dan
+  daftar bernomor menghasilkan `fontStyle: "bold"`, `textDecoration: "underline
+  line-through"`, teks `"1.  ADD A TITLE"` di node `Konva.Text`; tombol aktif tersorot.
+- **Efek teks**: menu Efek → bayangan (`shadowEnabled`, warna, blur 12, geser 4,
+  kepekatan 0,45), garis tepi huruf (`stroke`, 2 px), transparansi 0,6, dan spasi huruf
+  20 % (= 9,6 px pada huruf 48 px) sampai di node dan tampak di layar.
+- **Auto-fit**: dengan auto-fit menyala Transformer memberi semua jangkar; mengecilkan
+  tinggi kotak (gestur transform disimulasikan dengan `scaleY` + event `transformend` pada
+  node) menurunkan ukuran huruf 16 → 14, lalu menyempitkan lebar 300 → 120 px menurunkan ke
+  8 px dengan **dua baris yang sama persis** dengan hasil `wrapLines()` editor ini.
+- **Marquee** dengan seret mouse sungguhan: kotak memilih teks dan lingkaran yang
+  disentuhnya, Transformer memegang kedua node, toolbar "2 elemen dipilih", kotak hilang
+  setelah dilepas. **Seret grup** dengan mouse sungguhan: kedua node bergeser sama jauh,
+  dan **satu** Undo mengembalikan keduanya. **Ctrl+klik** menambah lalu mengeluarkan elemen.
+- **Toolbar gambar** (gambar dimasukkan lewat drop sintetis): Pas halaman (400×200 → 900×450
+  di (0, 75)), Balik horizontal (gambar tercermin di layar), Mask lingkaran, slider
+  Transparansi 70 % di panel Efek (`opacity` 0,7 di node).
+- Tidak ada galat di konsol browser maupun di log server.
 
 ### Yang diuji selain itu (tidak ada di repositori)
 
@@ -1917,11 +2182,26 @@ dibaca dari halaman aktif.
 
 ### Belum diuji
 
-- **`next build` dan aplikasi utuh di browser.** Registry npm tidak bisa dijangkau
-  dari lingkungan pengembangan (diblokir kebijakan jaringan), sehingga `konva`,
-  `react-konva`, dan `next` tidak terpasang (mencoba mengambil sumber Konva dari
-  GitHub juga diblokir). Akibatnya **interaksi Konva sungguhan belum pernah
-  dijalankan**: drag/transform gambar lewat Transformer, `Shape` gambar dengan
+- **Fitur v8 yang belum dilihat di Konva asli / Polotno asli:**
+  1. Menyeret **jangkar** Transformer dengan mouse sungguhan untuk auto-fit dan untuk
+     skala sudut seleksi ganda (ukuran huruf ikut). Yang dijalankan adalah gestur yang
+     disimulasikan pada node (lihat di atas); seret mouse sintetis pada jangkar 10 px tidak
+     mengenai jangkarnya.
+  2. **Satuan `letterSpacing` di Polotno** diasumsikan pecahan ukuran huruf (em). Bila
+     Polotno ternyata memakai px, spasi huruf hasil impor/ekspor akan salah skala.
+  3. Apakah Polotno punya field **`textTransform`** dan menggambar **garis tepi huruf**
+     di belakang huruf (di sini `fillAfterStrokeEnabled`); `custom.listType` dan
+     `custom.autoFit` hanya dibaca editor ini (di Polotno teks auto-fit tampil pada
+     `fontSize` penuh dan daftar tampil tanpa penanda).
+  4. Auto-fit memakai font yang sudah termuat saat diukur; bila web font termuat belakangan
+     ukurannya baru dihitung ulang saat teks/kotak berubah.
+  5. Popover toolbar di layar sempit (toolbar dibungkus dua baris) dan di perangkat sentuh;
+     marquee tidak ada untuk sentuhan.
+  6. Menyalin seleksi ganda (`Ctrl+C`) belum didukung; grup (*grouping*) tetap belum ada.
+- **`next build`.** Di v8 aplikasi sudah dijalankan dengan `next dev` dan Konva asli
+  (lihat "Diuji di browser dengan Konva asli"), tetapi build produksi belum. Bagian di
+  bawah ini ditulis untuk v7, ketika registry npm tidak bisa dijangkau; yang **masih**
+  belum diperiksa satu per satu di Konva asli: drag/transform gambar lewat Transformer, `Shape` gambar dengan
   `sceneFunc`/`hitFunc` di konteks Konva yang asli (bukan konteks 2D bawaan
   browser), `Stage.scale()`/`size()` yang dikembalikan saat export, dan
   `stage.toDataURL()` sesungguhnya. Logika di belakangnya diuji (store, ukuran,
@@ -1990,17 +2270,16 @@ dibaca dari halaman aktif.
 - Verifikasi terhadap Konva dan Polotno asli (lihat "Belum diuji"): jalankan `npm install
   && npm run dev`, impor semua template, export semua halaman, buka export Polotno di
   polotno.com
-- Bayangan di thumbnail; slider `opacity` elemen; mask bentuk lain (bintang, hati)
-- Tombol flip di toolbar (skema dan penggambaran sudah siap)
+- Bayangan dan transparansi di thumbnail; mask bentuk lain (bintang, hati)
 - Crop dengan rasio terkunci (1:1, 16:9, …) dan pembatalan crop dengan `Esc`
 - Drop beberapa gambar sekaligus (sekarang satu per drop) dan drop file `.json`
 - Impor grup Polotno (setelah aturan koordinat anaknya dipastikan)
 - Penyimpanan gambar di server/object storage sebagai ganti `data:` URL di JSON
-- Multi-select & grouping
+- Grouping (seleksi ganda sudah ada), copy/paste seleksi ganda, dan perataan antar-elemen
 - Pan kanvas dengan seret/spasi dan shortcut `Ctrl+0` / `Ctrl+=` / `Ctrl+-` (zoom
   dan overlay edit teks sudah ada)
 - Mengukur font di klien untuk toleransi lebar teks yang tepat (sekarang tetap 10 px)
-- Bold/italic/line-height di toolbar (datanya sudah ada di skema)
+- *Hanging indent* untuk daftar dan penanda daftar di `<textarea>` edit teks
 - Snapping & alignment guides
 - Test interaksi di browser (Playwright) dimasukkan ke repositori, dan CI yang
   menjalankan `npm test`, membangun, dan mendorong image Docker

@@ -14,13 +14,14 @@ import {
   MAX_SHADOW_OFFSET,
   MAX_STROKE_WIDTH,
   resolveImageEffects,
+  resolveOpacity,
 } from "@/lib/imageEffects";
 import { EFFECT_KEYS, FILTER_KEYS, clearPatch, type ImageStylePatch } from "@/lib/imageStyle";
 
 // ---------------------------------------------------------------------------
 // "Filter & Efek": one place for how a picture looks. Three cards side by side:
 //   Filter    — presets, brightness, contrast, saturation
-//   Efek      — blur, rounded corners, shape (mask)
+//   Efek      — opacity, blur, rounded corners, shape (mask)
 //   Bayangan  — drop shadow and border
 // Every control writes through setImageStyle(), so a slider drag is one undo
 // step and everything is saved in the JSON of the picture.
@@ -198,13 +199,22 @@ function Panel({ element, set }: { element: ImageElement; set: (patch: ImageStyl
             className="toolbar-button"
             onClick={() => set(clearPatch(EFFECT_KEYS))}
             disabled={!anyEffect}
-            title="Hapus blur, sudut membulat, bentuk, bayangan, dan garis tepi"
+            title="Hapus transparansi, blur, sudut membulat, bentuk, bayangan, dan garis tepi"
             data-style-action="reset-effects"
           >
             Reset
           </button>
         </header>
 
+        <Slider
+          label="Transparansi"
+          name="opacity"
+          value={Math.round(resolveOpacity(element) * 100)}
+          min={0}
+          max={100}
+          unit="%"
+          onChange={(v) => set({ opacity: v >= 100 ? undefined : v / 100 })}
+        />
         <Slider
           label="Blur"
           name="blur"

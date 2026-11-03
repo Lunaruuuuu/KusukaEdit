@@ -312,6 +312,7 @@ function hardReset(elements: ImageElement[] = []) {
     pages: [mkPage("page-1", { width: 900, height: 600, backgroundColor: "#ffffff" }, elements)],
     currentPageIndex: 0,
     selectedId: null,
+    selectedIds: [],
     editingId: null,
     croppingId: null,
     clipboard: null,
@@ -339,7 +340,7 @@ test("store: a dropped picture is centred on the drop point, selected, on top, O
 
 test("store: a new picture ends a text edit and a crop in progress", () => {
   hardReset([img()]);
-  useEditorStore.setState({ editingId: "t", croppingId: "i1", selectedId: "i1" });
+  useEditorStore.setState({ editingId: "t", croppingId: "i1", selectedId: "i1", selectedIds: ["i1"] });
   S().addImageElement({ src: "https://example.com/c.png", naturalWidth: 100, naturalHeight: 100 }, { at: { x: 10, y: 10 } });
   assert.equal(S().editingId, null);
   assert.equal(S().croppingId, null);
@@ -764,7 +765,10 @@ test("adapter: masks — a circle or triangle clipSrc is kept; any other is repo
 
 test("adapter: what is still unsupported on a picture is still reported", () => {
   assert.match(convertOne({ maskSrc: "https://x/y.svg" }).warnings.join("|"), /efek yang belum didukung/);
-  assert.match(convertOne({ opacity: 0.5 }).warnings.join("|"), /efek yang belum didukung/);
+  // opacity is supported on every element since v4
+  const half = convertOne({ opacity: 0.5 });
+  assert.deepEqual(half.warnings, []);
+  assert.equal(half.el.opacity, 0.5);
   // a filter this editor has no equivalent for is still reported
   assert.match(
     convertOne({ filters: { emboss: { intensity: 0.5 } } }).warnings.join("|"),
@@ -774,7 +778,7 @@ test("adapter: what is still unsupported on a picture is still reported", () => 
   for (const supported of [{ cornerRadius: 12 }, { sepiaEnabled: true }, { grayscaleEnabled: true }, { brightnessEnabled: true, brightness: 0.2 }]) {
     assert.deepEqual(convertOne(supported).warnings, [], JSON.stringify(supported));
   }
-  // blur / shadow on TEXT are not supported (only pictures have them)
+  // blur on TEXT is not supported (only pictures have it; the shadow is, since v4)
   const text = convertPolotnoToKusuka(polotno([{ id: "t", type: "text", x: 0, y: 0, width: 100, text: "Hai", fontSize: 20, blurEnabled: true }]));
   assert.match(text.warnings.join("|"), /efek yang belum didukung/);
   // an unreadable shadow colour is reported like any other unreadable colour

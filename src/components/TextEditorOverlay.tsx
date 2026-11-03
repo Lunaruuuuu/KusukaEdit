@@ -32,6 +32,16 @@ export default function TextEditorOverlay() {
 
 function TextEditor({ element }: { element: TextElement }) {
   const updateElement = useEditorStore((s) => s.updateElement);
+  const stageNode = useEditorStore((s) => s.stageNode);
+  // An auto-fit text is drawn smaller than its stored fontSize. The textarea
+  // uses the size the Konva node really has, read once when editing starts,
+  // so the text does not jump while it is edited. (Bullets / numbers of a
+  // list are not shown here: the textarea holds the text as typed.)
+  const [shownSize] = React.useState(() => {
+    const node = stageNode?.findOne(`#${element.id}`) as { fontSize?: () => number } | undefined;
+    const size = typeof node?.fontSize === "function" ? node.fontSize() : NaN;
+    return Number.isFinite(size) && size > 0 ? size : element.fontSize;
+  });
   const removeElement = useEditorStore((s) => s.removeElement);
   const setEditingId = useEditorStore((s) => s.setEditingId);
 
@@ -105,11 +115,14 @@ function TextEditor({ element }: { element: TextElement }) {
           }
         }}
         style={{
-          fontSize: element.fontSize,
+          fontSize: shownSize,
           fontFamily: element.fontFamily,
           fontWeight: bold ? "bold" : "normal",
           fontStyle: italic ? "italic" : "normal",
           lineHeight: element.lineHeight,
+          letterSpacing: (element.letterSpacing ?? 0) * shownSize,
+          textDecoration: element.textDecoration ?? "none",
+          textTransform: element.textTransform ?? "none",
           textAlign: element.align,
           color: element.fill,
         }}

@@ -17,6 +17,9 @@
 //   custom.filterPreset (our own, written for     filterPreset: vivid | fade | warm | cool | dramatic
 //     the presets Polotno has no flag for)
 //
+// Opacity and the drop shadow are not picture-only: readPolotnoCommonEffects /
+// commonEffectsToPolotno do the same for text and figures.
+//
 // An effect is only read when Polotno says it is ON (`blurEnabled`,
 // `shadowEnabled`): its defaults (blurRadius 10, shadowBlur 5 ...) are present
 // in files where the effect is off, and must not switch it on.
@@ -34,8 +37,14 @@ import {
   MAX_SHADOW_OFFSET,
   MAX_STROKE_WIDTH,
   resolveImageEffects,
+  resolveOpacity,
+  resolveShadow,
   type ImageEffectFields,
+  type ShadowFields,
 } from "@/lib/imageEffects";
+
+/** Opacity + drop shadow: the effects every element type has. */
+export type CommonEffectFields = Partial<ShadowFields & { opacity: number }>;
 
 type Rec = Record<string, unknown>;
 
@@ -275,20 +284,7 @@ export function readPolotnoImageEffects(child: Rec, color: ColorReader): ReadEff
     }
   }
 
-  if (child.shadowEnabled === true) {
-    const raw = child.shadowColor === undefined ? "black" : child.shadowColor;
-    const shadowColor = color(raw, "#000000");
-    const candidate: Partial<ImageEffectFields> = {
-      shadowColor,
-      shadowBlur: clamp(num(child.shadowBlur, POLOTNO_SHADOW_BLUR), 0, MAX_SHADOW_BLUR),
-      shadowOffsetX: clamp(num(child.shadowOffsetX, 0), -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET),
-      shadowOffsetY: clamp(num(child.shadowOffsetY, 0), -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET),
-      // Konva multiplies shadowOpacity into the colour, so the colour's own
-      // alpha (rgba(0,0,0,0.4)) and Polotno's shadowOpacity combine the same way.
-      shadowOpacity: round4(clamp(num(child.shadowOpacity, 1), 0, 1) * colorAlpha(raw)),
-    };
-    if (resolveImageEffects(candidate).shadow !== null) Object.assign(fields, candidate);
-  }
+  Object.assign(fields, readPolotnoCommonEffects(child, color));
 
   let unknownMask = false;
   if (typeof child.clipSrc === "string" && child.clipSrc.trim() !== "") {
@@ -325,6 +321,56 @@ export function readPolotnoImageEffects(child: Rec, color: ColorReader): ReadEff
   return { fields, unknownMask, unknownFilter: hasUnknownFilters(child.filters), presetConflict };
 }
 
+/**
+ * Opacity and drop shadow of ANY Polotno element (text, figure, image, svg).
+ * Like the picture effects, the shadow is read only when `shadowEnabled` is
+ * true, and only when it would be visible.
+ */
+export function readPolotnoCommonEffects(child: Rec, color: ColorReader): CommonEffectFields {
+  const fields: CommonEffectFields = {};
+  const opacity = num(child.opacity, 1);
+  if (opacity < 1) fields.opacity = round4(clamp(opacity, 0, 1));
+
+  if (child.shadowEnabled === true) {
+    const raw = child.shadowColor === undefined ? "black" : child.shadowColor;
+    const shadowColor = color(raw, "#000000");
+    const candidate: Partial<ShadowFields> = {
+      shadowColor,
+      shadowBlur: clamp(num(child.shadowBlur, POLOTNO_SHADOW_BLUR), 0, MAX_SHADOW_BLUR),
+      shadowOffsetX: clamp(num(child.shadowOffsetX, 0), -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET),
+      shadowOffsetY: clamp(num(child.shadowOffsetY, 0), -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET),
+      // Konva multiplies shadowOpacity into the colour, so the colour's own
+      // alpha (rgba(0,0,0,0.4)) and Polotno's shadowOpacity combine the same way.
+      shadowOpacity: round4(clamp(num(child.shadowOpacity, 1), 0, 1) * colorAlpha(raw)),
+    };
+    if (resolveShadow(candidate) !== null) Object.assign(fields, candidate);
+  }
+  return fields;
+}
+
+/**
+ * The Polotno properties for opacity and the drop shadow of any element. A
+ * shadow that is off writes nothing (Polotno's default: disabled). Opacity is
+ * left to the caller, which always writes it (Polotno's elements carry it).
+ */
+export function shadowToPolotno(el: CommonEffectFields): Rec {
+  const shadow = resolveShadow(el);
+  if (!shadow) return {};
+  return {
+    shadowEnabled: true,
+    shadowColor: shadow.color,
+    shadowBlur: shadow.blur,
+    shadowOffsetX: shadow.offsetX,
+    shadowOffsetY: shadow.offsetY,
+    shadowOpacity: shadow.opacity,
+  };
+}
+
+/** Opacity to write to a Polotno element (always present there; 1 = opaque). */
+export function opacityToPolotno(el: CommonEffectFields): number {
+  return resolveOpacity(el);
+}
+
 function isFilterPreset(value: unknown): value is FilterPreset {
   return typeof value === "string" && (FILTER_PRESETS as readonly string[]).includes(value);
 }
@@ -349,14 +395,7 @@ export function readNativeImageEffects(item: Rec): Partial<ImageEffectFields> {
     fields.strokeWidth = clamp(item.strokeWidth, 0, MAX_STROKE_WIDTH);
   }
 
-  const shadowColor = parseColor(item.shadowColor);
-  if (shadowColor !== null && shadowColor !== "transparent") {
-    fields.shadowColor = shadowColor;
-    if (finite(item.shadowBlur)) fields.shadowBlur = clamp(item.shadowBlur, 0, MAX_SHADOW_BLUR);
-    if (finite(item.shadowOffsetX)) fields.shadowOffsetX = clamp(item.shadowOffsetX, -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET);
-    if (finite(item.shadowOffsetY)) fields.shadowOffsetY = clamp(item.shadowOffsetY, -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET);
-    if (finite(item.shadowOpacity)) fields.shadowOpacity = clamp(item.shadowOpacity, 0, 1);
-  }
+  Object.assign(fields, readNativeCommonEffects(item));
 
   if (typeof item.maskShape === "string" && (MASK_SHAPES as readonly string[]).includes(item.maskShape)) {
     fields.maskShape = item.maskShape as MaskShape;
@@ -370,6 +409,23 @@ export function readNativeImageEffects(item: Rec): Partial<ImageEffectFields> {
     if (finite(value) && value !== 0) fields[key] = Math.round(clamp(value, -FILTER_LIMIT, FILTER_LIMIT));
   }
   if (isFilterPreset(item.filterPreset)) fields.filterPreset = item.filterPreset;
+  return fields;
+}
+
+/** Opacity and drop shadow of an element of a native file, validated like the picture effects. */
+export function readNativeCommonEffects(item: Rec): CommonEffectFields {
+  const fields: CommonEffectFields = {};
+  // 1 is "no effect": not stored, so the file stays as it was.
+  if (finite(item.opacity) && item.opacity < 1) fields.opacity = clamp(item.opacity, 0, 1);
+
+  const shadowColor = parseColor(item.shadowColor);
+  if (shadowColor !== null && shadowColor !== "transparent") {
+    fields.shadowColor = shadowColor;
+    if (finite(item.shadowBlur)) fields.shadowBlur = clamp(item.shadowBlur, 0, MAX_SHADOW_BLUR);
+    if (finite(item.shadowOffsetX)) fields.shadowOffsetX = clamp(item.shadowOffsetX, -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET);
+    if (finite(item.shadowOffsetY)) fields.shadowOffsetY = clamp(item.shadowOffsetY, -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET);
+    if (finite(item.shadowOpacity)) fields.shadowOpacity = clamp(item.shadowOpacity, 0, 1);
+  }
   return fields;
 }
 
@@ -391,14 +447,7 @@ export function imageEffectsToPolotno(el: Partial<ImageEffectFields>, customSour
     out.borderSize = fx.stroke.width;
     out.borderColor = fx.stroke.color;
   }
-  if (fx.shadow) {
-    out.shadowEnabled = true;
-    out.shadowColor = fx.shadow.color;
-    out.shadowBlur = fx.shadow.blur;
-    out.shadowOffsetX = fx.shadow.offsetX;
-    out.shadowOffsetY = fx.shadow.offsetY;
-    out.shadowOpacity = fx.shadow.opacity;
-  }
+  Object.assign(out, shadowToPolotno(el));
   if (fx.mask) out.clipSrc = maskToClipSrc(fx.mask);
   // The radius is written even under a mask (the mask wins on screen, but Polotno
   // can hold both, and a file that is read and written again must not lose it).

@@ -79,7 +79,7 @@ export async function exportAllPagesAsZip(options: ExportAllOptions): Promise<Ex
   const initial = store.getState();
   const pageCount = initial.pages.length;
   const startIndex = initial.currentPageIndex;
-  const startSelectedId = initial.selectedId;
+  const startSelectedIds = initial.selectedIds;
 
   // Anything half-done (a text being typed, a crop) ends before the pages start changing.
   (document.activeElement as HTMLElement | null)?.blur?.();
@@ -141,13 +141,9 @@ export async function exportAllPagesAsZip(options: ExportAllOptions): Promise<Ex
     const state = store.getState();
     state.setExportProgress(null);
     // The page the user was on is shown again (renderPagesSequentially did that);
-    // so is the element they had selected, when it is still there.
-    if (
-      startSelectedId !== null &&
-      state.currentPageIndex === startIndex &&
-      state.pages[startIndex]?.elements.some((el) => el.id === startSelectedId)
-    ) {
-      state.setSelectedId(startSelectedId);
+    // so are the elements they had selected (setSelection skips any that are gone).
+    if (startSelectedIds.length > 0 && state.currentPageIndex === startIndex) {
+      state.setSelection(startSelectedIds);
     }
   }
 }

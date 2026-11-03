@@ -12,7 +12,9 @@ import ZoomControls from "./ZoomControls";
 import { useCanvasZoom } from "@/lib/useCanvasZoom";
 import { scaledSize } from "@/lib/zoom";
 import { prepareImageFile } from "@/lib/imageUpload";
-import { clampPointToCanvas, clientToDesign, hasFileDrag, pickDroppedFile } from "@/lib/dropImage";
+import { clampPointToCanvas, clientToDesign, hasFileDrag, pickDroppedFile, type Point } from "@/lib/dropImage";
+import { elementsInMarquee, marqueeSelection, MARQUEE_MIN_DRAG, rectFromPoints, type Rect as MarqueeRect } from "@/lib/selection";
+import { bakeTransform } from "@/lib/transform";
 
 // How long a drop message ("not a picture", ...) stays on screen.
 const DROP_NOTICE_MS = 6000;
@@ -30,8 +32,19 @@ const ALL_ANCHORS = [
 // Text is resized by width only; its height follows the wrapped text.
 const TEXT_ANCHORS = ["middle-left", "middle-right"];
 // Pictures are resized by the corners only, with the ratio locked: the side
-// handles would stretch them out of proportion.
+// handles would stretch them out of proportion. A multiple selection is
+// scaled the same way, so every element in it keeps its shape.
 const IMAGE_ANCHORS = ["top-left", "top-right", "bottom-right", "bottom-left"];
+
+/** A marquee being dragged: where it started (design px) and what was selected before. */
+interface MarqueeDrag {
+  start: Point;
+  startClient: Point;
+  previous: string[];
+  additive: boolean;
+  /** Became a real drag (moved further than MARQUEE_MIN_DRAG): not a click any more. */
+  dragging: boolean;
+}
 
 // This whole component only ever runs in the browser (it is loaded via
 // `next/dynamic(() => import(...), { ssr: false })` from EditorRoot), so it
@@ -44,12 +57,21 @@ export default function CanvasWorkspace() {
   const pageId = useEditorStore((s) => selectCurrentPage(s).id);
   const exportProgress = useEditorStore((s) => s.exportProgress);
   const selectedId = useEditorStore((s) => s.selectedId);
+  const selectedIds = useEditorStore((s) => s.selectedIds);
   const editingId = useEditorStore((s) => s.editingId);
   const croppingId = useEditorStore((s) => s.croppingId);
   const setCroppingId = useEditorStore((s) => s.setCroppingId);
   const addImageElement = useEditorStore((s) => s.addImageElement);
   const selectedType = useEditorStore((s) => selectElementById(s, s.selectedId)?.type);
+  const selectedAutoFit = useEditorStore((s) => {
+    const el = selectElementById(s, s.selectedId);
+    return el?.type === "text" && el.autoFit === true;
+  });
   const setSelectedId = useEditorStore((s) => s.setSelectedId);
+  const setSelection = useEditorStore((s) => s.setSelection);
+  const toggleSelected = useEditorStore((s) => s.toggleSelected);
+  const updateElement = useEditorStore((s) => s.updateElement);
+  const updateElements = useEditorStore((s) => s.updateElements);
   const removeSelected = useEditorStore((s) => s.removeSelected);
   const nudgeSelected = useEditorStore((s) => s.nudgeSelected);
   const setStageNode = useEditorStore((s) => s.setStageNode);
@@ -62,6 +84,11 @@ export default function CanvasWorkspace() {
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const nodesRef = useRef<Map<string, Konva.Node>>(new Map());
   const areaRef = useRef<HTMLDivElement | null>(null);
+
+  // Drag-to-select. The rectangle is view state (design px), drawn on top of
+  // the page while the mouse button is down; never part of the document.
+  const [marquee, setMarquee] = useState<MarqueeRect | null>(null);
+  const marqueeRef = useRef<MarqueeDrag | null>(null);
 
   // Drag-and-drop of a picture from the desktop (see the handlers below).
   const [dragActive, setDragActive] = useState(false);
@@ -94,20 +121,113 @@ export default function CanvasWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep the Transformer bound to whichever node is currently selected —
-  // but not while that node is hidden behind the text-editing textarea or the
-  // crop overlay.
+  // Keep the Transformer bound to every selected node — but not to one that is
+  // hidden behind the text-editing textarea or the crop overlay. With several
+  // nodes the Transformer draws one frame around all of them, and dragging any
+  // of them moves the others along (Konva does that for its attached nodes).
   useEffect(() => {
     const transformer = transformerRef.current;
     if (!transformer) return;
 
-    const hidden = editingId === selectedId || croppingId === selectedId;
-    const node = selectedId && !hidden ? nodesRef.current.get(selectedId) : null;
-    transformer.nodes(node ? [node] : []);
+    const nodes = selectedIds
+      .filter((id) => id !== editingId && id !== croppingId)
+      .map((id) => nodesRef.current.get(id))
+      .filter((node): node is Konva.Node => node !== undefined);
+    transformer.nodes(nodes);
     transformer.getLayer()?.batchDraw();
     // `pageId`: after a page change the old page's nodes are gone, so the
     // Transformer is re-bound (to nothing: the selection was reset).
-  }, [selectedId, editingId, croppingId, elements, pageId]);
+  }, [selectedIds, editingId, croppingId, elements, pageId]);
+
+  // The end of a drag or a Transformer gesture on `id`. When `id` is part of a
+  // multiple selection, EVERY selected node is read and written in one call,
+  // so moving or scaling a group is one undo step. Konva fires the event on
+  // each node of the group; the later calls find the numbers already written
+  // (and the scale already back at 1) and change nothing.
+  const handleGestureEnd = useCallback(
+    (id: string, kind: "drag" | "transform") => {
+      const state = useEditorStore.getState();
+      const group = state.selectedIds.length > 1 && state.selectedIds.includes(id) ? state.selectedIds : [id];
+      const changes = group.flatMap((elementId) => {
+        const node = nodesRef.current.get(elementId);
+        const el = selectElementById(state, elementId);
+        if (!node || !el) return [];
+        if (kind === "drag") return [{ id: elementId, attrs: { x: node.x(), y: node.y() } }];
+        const attrs = bakeTransform(el, {
+          x: node.x(),
+          y: node.y(),
+          rotation: node.rotation(),
+          scaleX: node.scaleX(),
+          scaleY: node.scaleY(),
+        });
+        // Konva scaled the node; the scale now lives in width/height, so the
+        // node starts the next transform from a clean state.
+        node.scaleX(1);
+        node.scaleY(1);
+        return [{ id: elementId, attrs }];
+      });
+      if (changes.length === 1) updateElement(changes[0].id, changes[0].attrs);
+      else updateElements(changes, `selection:${group.join(",")}`);
+    },
+    [updateElement, updateElements]
+  );
+
+  // ---------------------------------------------------------------------
+  // Marquee: pressing on the empty page and dragging draws a selection box;
+  // every element it touches is selected, live, while it is dragged. A press
+  // that does not move is a click on the empty page: it deselects. With
+  // Ctrl/Cmd/Shift held the box ADDS to the current selection.
+  //
+  // The move / up listeners sit on `window`, so the box keeps following the
+  // pointer when it leaves the page (the coordinates are then outside it).
+  // ---------------------------------------------------------------------
+  const startMarquee = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (e.evt.button !== 0) return;
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const client = { x: e.evt.clientX, y: e.evt.clientY };
+    const state = useEditorStore.getState();
+    marqueeRef.current = {
+      start: clientToDesign(client, rect, zoom),
+      startClient: client,
+      previous: state.selectedIds,
+      additive: e.evt.ctrlKey || e.evt.metaKey || e.evt.shiftKey,
+      dragging: false,
+    };
+  };
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const drag = marqueeRef.current;
+      const rect = wrapRef.current?.getBoundingClientRect();
+      if (!drag || !rect) return;
+      if (!drag.dragging) {
+        const moved = Math.hypot(e.clientX - drag.startClient.x, e.clientY - drag.startClient.y);
+        if (moved < MARQUEE_MIN_DRAG) return;
+        drag.dragging = true;
+      }
+      const box = rectFromPoints(drag.start, clientToDesign({ x: e.clientX, y: e.clientY }, rect, zoom));
+      setMarquee(box);
+      // Bounding-box intersection, recomputed on every move: the selection
+      // (and the Transformer frame) follows the box as it is drawn.
+      const touched = elementsInMarquee(selectCurrentPage(useEditorStore.getState()).elements, box);
+      setSelection(marqueeSelection(drag.previous, touched, drag.additive));
+    };
+    const onUp = () => {
+      const drag = marqueeRef.current;
+      if (!drag) return;
+      marqueeRef.current = null;
+      setMarquee(null);
+      // A plain click on the empty page deselects (a modified click keeps the selection).
+      if (!drag.dragging && !drag.additive) setSelectedId(null);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [zoom, setSelection, setSelectedId, wrapRef]);
 
   // Cropping belongs to the selected picture: if the selection moves away by
   // any route, the crop overlay closes (the node would otherwise stay hidden).
@@ -169,9 +289,15 @@ export default function CanvasWorkspace() {
         redo();
         return;
       }
+      if (mod && key === "a") {
+        // Select every element of the page (the page, not the browser's text).
+        e.preventDefault();
+        state.setSelection(selectCurrentPage(state).elements.map((el) => el.id));
+        return;
+      }
       if (mod && key === "c") {
-        // Only claim the shortcut when an element is selected, so copying
-        // ordinary page text still works.
+        // Only claim the shortcut when ONE element is selected, so copying
+        // ordinary page text still works. (A multiple selection is not copied.)
         if (useEditorStore.getState().selectedId) {
           e.preventDefault();
           copySelected();
@@ -187,6 +313,12 @@ export default function CanvasWorkspace() {
       }
       if (mod) return; // leave every other Ctrl/Cmd combination to the browser
 
+      if (e.key === "Escape" && state.selectedIds.length > 0) {
+        e.preventDefault();
+        setSelectedId(null);
+        return;
+      }
+
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         removeSelected();
@@ -200,7 +332,7 @@ export default function CanvasWorkspace() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [removeSelected, nudgeSelected, undo, redo, copySelected, pasteClipboard]);
+  }, [removeSelected, nudgeSelected, undo, redo, copySelected, pasteClipboard, setSelectedId]);
 
   // ---------------------------------------------------------------------
   // Dropping a picture file from the desktop onto the workspace.
@@ -330,7 +462,12 @@ export default function CanvasWorkspace() {
             scaleY={zoom}
             className="konva-stage"
             onMouseDown={(e) => {
-              // Clicking empty canvas area deselects.
+              // A press on the empty page starts a marquee (a click without
+              // moving deselects, see startMarquee).
+              if (e.target === e.target.getStage()) startMarquee(e);
+            }}
+            onTouchStart={(e) => {
+              // Touch has no marquee: tapping the empty page deselects.
               if (e.target === e.target.getStage()) setSelectedId(null);
             }}
           >
@@ -348,7 +485,8 @@ export default function CanvasWorkspace() {
                   key={el.id}
                   element={el}
                   zoom={zoom}
-                  onSelect={() => setSelectedId(el.id)}
+                  onSelect={(additive) => (additive ? toggleSelected(el.id) : setSelectedId(el.id))}
+                  onGestureEnd={handleGestureEnd}
                   registerNode={registerNode}
                 />
               ))}
@@ -370,11 +508,15 @@ export default function CanvasWorkspace() {
                 anchorCornerRadius={5}
                 rotateAnchorOffset={26}
                 enabledAnchors={
-                  selectedType === "text"
-                    ? TEXT_ANCHORS
-                    : selectedType === "image"
-                      ? IMAGE_ANCHORS
-                      : ALL_ANCHORS
+                  selectedIds.length > 1
+                    ? IMAGE_ANCHORS
+                    : selectedType === "text"
+                      ? selectedAutoFit
+                        ? ALL_ANCHORS // an auto-fit box has a height of its own
+                        : TEXT_ANCHORS
+                      : selectedType === "image"
+                        ? IMAGE_ANCHORS
+                        : ALL_ANCHORS
                 }
                 boundBoxFunc={(oldBox, newBox) => {
                   // Konva hands this function the boxes in ON-SCREEN pixels, so
@@ -384,6 +526,20 @@ export default function CanvasWorkspace() {
                   return newBox;
                 }}
               />
+              {marquee && (
+                <Rect
+                  x={marquee.x}
+                  y={marquee.y}
+                  width={marquee.width}
+                  height={marquee.height}
+                  fill="rgba(91, 140, 255, 0.12)"
+                  stroke="#5b8cff"
+                  // one screen pixel at any zoom
+                  strokeWidth={1 / zoom}
+                  dash={[4 / zoom, 3 / zoom]}
+                  listening={false}
+                />
+              )}
             </Layer>
           </Stage>
           {/* The text editor <textarea> is written in design pixels. This layer

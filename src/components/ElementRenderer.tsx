@@ -3,7 +3,7 @@
 import React, { useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import { Rect, Ellipse, Text, Shape } from "react-konva";
 import Konva from "konva";
-import type { CanvasElement, ImageElement } from "@/types/editor";
+import type { CanvasElement, ImageElement, TextElement } from "@/types/editor";
 import { useEditorStore } from "@/store/useEditorStore";
 import { useLoadedImage } from "@/lib/useLoadedImage";
 import { drawPicture, drawPictureHitBox, type PictureContext } from "@/lib/drawPicture";
@@ -13,34 +13,94 @@ import {
   blurCacheConfig,
   clearImageBlur,
   resolveImageEffects,
+  resolveOpacity,
+  resolveShadow,
   type BlurNode,
+  type ResolvedShadow,
 } from "@/lib/imageEffects";
 import { filterKey, filterPicture } from "@/lib/imageFilters";
+import { displayText } from "@/lib/textOptions";
+import { fitFontSize, makeMeasure } from "@/lib/textFit";
 
 interface Props {
   element: CanvasElement;
   /** View zoom (1 = 100%): a blurred picture is cached at the resolution it is shown at. */
   zoom: number;
-  onSelect: () => void;
+  /**
+   * A click / tap on the element. `additive` is true with Ctrl/Cmd (or Shift)
+   * held: the element is added to (or taken out of) the selection.
+   */
+  onSelect: (additive: boolean) => void;
+  /**
+   * The end of a drag or a Transformer gesture. CanvasWorkspace reads the
+   * node(s) and writes the new numbers — for every selected element at once
+   * when several are selected, so a group gesture is ONE undo step.
+   */
+  onGestureEnd: (id: string, kind: "drag" | "transform") => void;
   registerNode: (id: string, node: Konva.Node | null) => void;
 }
 
-// Props shared by every kind of node: position, drag, transform, selection.
-interface CommonKonvaProps {
+// Props shared by every kind of node: position, drag, transform, selection,
+// and the effects every element type has (opacity, drop shadow).
+interface CommonKonvaProps extends ShadowProps {
   id: string;
   x: number;
   y: number;
   rotation: number;
+  opacity: number;
   draggable: boolean;
-  onClick: () => void;
+  onClick: (e: Konva.KonvaEventObject<MouseEvent>) => void;
   onTap: () => void;
-  onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void;
-  onTransformEnd: (e: Konva.KonvaEventObject<Event>) => void;
+  onDragEnd: () => void;
+  onTransformEnd: () => void;
   ref: (node: Konva.Node | null) => void;
 }
 
-const MIN_TEXT_WIDTH = 20;
-const MIN_SHAPE_SIZE = 5;
+interface ShadowProps {
+  shadowEnabled: boolean;
+  shadowColor?: string;
+  shadowBlur: number;
+  shadowOffsetX: number;
+  shadowOffsetY: number;
+  shadowOpacity: number;
+}
+
+/** Konva's shadow attributes for a resolved shadow (or none). */
+function shadowProps(shadow: ResolvedShadow | null): ShadowProps {
+  return {
+    shadowEnabled: shadow !== null,
+    shadowColor: shadow?.color,
+    shadowBlur: shadow?.blur ?? 0,
+    shadowOffsetX: shadow?.offsetX ?? 0,
+    shadowOffsetY: shadow?.offsetY ?? 0,
+    shadowOpacity: shadow?.opacity ?? 1,
+  };
+}
+
+// One hidden Konva.Text, used only to measure (never added to a layer). Its
+// measureSize() is the canvas measureText with exactly the font string Konva
+// builds for drawing, so a fit computed with it matches what is drawn.
+let measuringNode: Konva.Text | null = null;
+
+/** Auto-fit: the font size an auto-fit text is drawn with (see lib/textFit.ts). */
+function useFittedFontSize(el: TextElement, shown: string): number {
+  return useMemo(() => {
+    if (!el.autoFit) return el.fontSize;
+    measuringNode ??= new Konva.Text({ text: "" });
+    const node = measuringNode;
+    node.fontFamily(el.fontFamily);
+    node.fontStyle(el.fontStyle);
+    node.letterSpacing(0); // added by makeMeasure, in proportion to the size
+    const measure = makeMeasure((text, size) => {
+      node.fontSize(size);
+      return node.measureSize(text).width;
+    }, el.letterSpacing ?? 0);
+    return fitFontSize(
+      { text: shown, width: el.width, height: el.height, fontSize: el.fontSize, lineHeight: el.lineHeight },
+      measure
+    );
+  }, [el.autoFit, el.fontFamily, el.fontStyle, el.fontSize, el.letterSpacing, el.width, el.height, el.lineHeight, shown]);
+}
 
 // While a picture is still loading (or failed to load) its box is drawn as a
 // dashed placeholder, so the element stays visible, selectable and resizable.
@@ -55,10 +115,12 @@ function ImageNode({
   element,
   common,
   zoom,
+  selectAlone,
 }: {
   element: ImageElement;
   common: CommonKonvaProps;
   zoom: number;
+  selectAlone: () => void;
 }) {
   const { image, status } = useLoadedImage(element.src);
   const loaded = status === "loaded" && image !== null;
@@ -171,7 +233,7 @@ function ImageNode({
   }, [blur, loaded, image, filtered, zoom, width, height, cropKey, flipX, flipY, mask, cornerRadius, strokeKey, shadowKey]);
 
   const startCropping = () => {
-    common.onClick(); // select it first
+    selectAlone(); // a crop works on one picture
     setCroppingId(element.id);
   };
 
@@ -190,12 +252,8 @@ function ImageNode({
       stroke={loaded ? stroke?.color : status === "error" ? PLACEHOLDER_ERROR_STROKE : PLACEHOLDER_STROKE}
       strokeWidth={loaded ? (stroke?.width ?? 0) : 2}
       dash={loaded ? undefined : [8, 6]}
-      shadowEnabled={shadow !== null}
-      shadowColor={shadow?.color}
-      shadowBlur={shadow?.blur ?? 0}
-      shadowOffsetX={shadow?.offsetX ?? 0}
-      shadowOffsetY={shadow?.offsetY ?? 0}
-      shadowOpacity={shadow?.opacity ?? 1}
+      // the shadow of a picture that is still loading would be the placeholder's
+      {...shadowProps(shadow)}
       // Shadow attributes are applied to every drawing call of the scene
       // function (see drawPicture); the "perfect draw" buffer would apply one
       // shadow to the finished composite instead.
@@ -224,8 +282,7 @@ function ImageNode({
   );
 }
 
-export default function ElementRenderer({ element, zoom, onSelect, registerNode }: Props) {
-  const updateElement = useEditorStore((s) => s.updateElement);
+export default function ElementRenderer({ element, zoom, onSelect, onGestureEnd, registerNode }: Props) {
   const syncMeasuredHeight = useEditorStore((s) => s.syncMeasuredHeight);
   const setEditingId = useEditorStore((s) => s.setEditingId);
   // While the <textarea> overlay is open the Konva node is hidden (so the
@@ -241,99 +298,72 @@ export default function ElementRenderer({ element, zoom, onSelect, registerNode 
     [element.id, registerNode]
   );
 
+  const text = element.type === "text" ? element : null;
+  const shown = text ? displayText(text) : "";
+  const fittedSize = useFittedFontSize(
+    // the hook runs for every element; for a non-text element it does nothing
+    text ?? ({ autoFit: false, fontSize: 0 } as TextElement),
+    shown
+  );
+
   // A text node has no fixed height: Konva lays the text out and wraps it
   // inside `width`. Copy the measured height back into the store so exported
-  // JSON carries the real box (this does not create an undo step).
-  const textLayoutKey =
-    element.type === "text"
-      ? [element.text, element.fontSize, element.fontFamily, element.fontStyle, element.lineHeight, element.width].join("|")
-      : "";
+  // JSON carries the real box (this does not create an undo step). An auto-fit
+  // box is the exception: its height is the user's, and the text fits into it.
+  const textLayoutKey = text
+    ? [shown, text.fontSize, text.fontFamily, text.fontStyle, text.lineHeight, text.width, text.letterSpacing, text.autoFit].join("|")
+    : "";
   useLayoutEffect(() => {
-    if (element.type !== "text") return;
+    if (!text || text.autoFit) return;
     const node = nodeRef.current;
     if (node) syncMeasuredHeight(element.id, node.height());
-  }, [textLayoutKey, element.id, element.type, syncMeasuredHeight]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textLayoutKey, element.id, syncMeasuredHeight]);
 
   const commonProps: CommonKonvaProps = {
     id: element.id,
     x: element.x,
     y: element.y,
     rotation: element.rotation,
+    opacity: resolveOpacity(element),
+    // A picture's shadow is drawn by drawPicture (ImageNode overrides this).
+    ...shadowProps(element.type === "image" ? null : resolveShadow(element)),
     draggable: true,
-    onClick: onSelect,
-    onTap: onSelect,
-    onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
-      updateElement(element.id, { x: e.target.x(), y: e.target.y() });
-    },
-    onTransformEnd: (e: Konva.KonvaEventObject<Event>) => {
-      const node = e.target;
-      // Konva scales the node instead of changing width/height directly.
-      // We read the scale, bake it into width/height, then reset scale
-      // back to 1 so future transforms start from a clean state.
-      //
-      // (A mirrored picture is mirrored inside its drawing, so its node never
-      // has a negative scale; Math.abs is just a guard.)
-      const scaleX = Math.abs(node.scaleX());
-      const scaleY = Math.abs(node.scaleY());
-      node.scaleX(1);
-      node.scaleY(1);
-
-      if (element.type === "text") {
-        // Text only resizes horizontally; its height follows the wrapped text.
-        updateElement(element.id, {
-          x: node.x(),
-          y: node.y(),
-          rotation: node.rotation(),
-          width: Math.max(MIN_TEXT_WIDTH, element.width * scaleX),
-          // The width is now one the user chose: exact, with no import tolerance.
-          ...(element.widthTolerance ? { widthTolerance: 0 } : {}),
-        });
-        return;
-      }
-
-      if (element.type === "image") {
-        // Pictures are only scaled proportionally (the Transformer offers just
-        // the corner handles). The new height is derived from the new width
-        // and the box's own aspect ratio, so the picture can never drift out
-        // of proportion through rounding.
-        const width = Math.max(MIN_SHAPE_SIZE, element.width * scaleX);
-        const aspect = element.width > 0 ? element.height / element.width : 1;
-        updateElement(element.id, {
-          x: node.x(),
-          y: node.y(),
-          rotation: node.rotation(),
-          width,
-          height: width * aspect,
-        });
-        return;
-      }
-
-      updateElement(element.id, {
-        x: node.x(),
-        y: node.y(),
-        rotation: node.rotation(),
-        width: Math.max(MIN_SHAPE_SIZE, element.width * scaleX),
-        height: Math.max(MIN_SHAPE_SIZE, element.height * scaleY),
-      });
-    },
+    onClick: (e) => onSelect(e.evt.ctrlKey || e.evt.metaKey || e.evt.shiftKey),
+    onTap: () => onSelect(false),
+    // Drag and transform both end in the store's updateElement(s), which
+    // records the "before" state through the debounced history (one undo
+    // step per gesture, for one element or a whole selection).
+    onDragEnd: () => onGestureEnd(element.id, "drag"),
+    onTransformEnd: () => onGestureEnd(element.id, "transform"),
     ref: setNode,
   };
 
   if (element.type === "text") {
     const startEditing = () => {
-      onSelect();
+      onSelect(false);
       setEditingId(element.id);
     };
+    const strokeOn = !!element.stroke && (element.strokeWidth ?? 0) > 0;
     return (
       <Text
         {...commonProps}
         width={element.width}
-        text={element.text}
-        fontSize={element.fontSize}
+        // auto-fit: a fixed box; otherwise Konva measures the height itself
+        height={element.autoFit ? element.height : undefined}
+        text={shown}
+        fontSize={fittedSize}
         fontFamily={element.fontFamily}
         fontStyle={element.fontStyle}
         lineHeight={element.lineHeight}
+        // stored as a fraction of the font size (like Polotno); Konva wants px
+        letterSpacing={(element.letterSpacing ?? 0) * fittedSize}
+        textDecoration={element.textDecoration ?? ""}
         fill={element.fill}
+        stroke={strokeOn ? element.stroke : undefined}
+        strokeWidth={strokeOn ? element.strokeWidth : 0}
+        // the outline sits behind the letters, so it never eats into them
+        fillAfterStrokeEnabled
         align={element.align}
         visible={!isEditing}
         onDblClick={startEditing}
@@ -373,7 +403,5 @@ export default function ElementRenderer({ element, zoom, onSelect, registerNode 
     );
   }
 
-  // Drag and transform both end in updateElement(), which records the
-  // "before" state through the store's debounced history (one undo step per gesture).
-  return <ImageNode element={element} common={commonProps} zoom={zoom} />;
+  return <ImageNode element={element} common={commonProps} zoom={zoom} selectAlone={() => onSelect(false)} />;
 }

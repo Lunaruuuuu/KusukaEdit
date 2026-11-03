@@ -54,6 +54,7 @@ async function hardReset() {
     pages: [mkPage("page-1", { width: 900, height: 600, backgroundColor: "#ffffff" })],
     currentPageIndex: 0,
     selectedId: null,
+    selectedIds: [],
     editingId: null,
     croppingId: null,
     clipboard: null,
@@ -581,7 +582,9 @@ test("adapter: image edge cases — no src is skipped, blob: is flagged, hidden 
   const all = warnings.join(" | ");
   assert.match(all, /gambar tanpa sumber/);
   assert.match(all, /blob:/);
-  assert.match(all, /efek/);
+  // opacity is supported since v4: copied, not reported
+  assert.doesNotMatch(all, /efek/);
+  assert.equal(d.pages[0].elements[1].opacity, 0.5);
 });
 
 test("adapter: the editor's own image survives Kusuka -> Polotno -> Kusuka exactly", () => {

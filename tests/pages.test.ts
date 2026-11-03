@@ -103,6 +103,7 @@ async function fresh(pages?: Page[], index = 0): Promise<void> {
     pages: pages ?? [mkPage("p1", SIZE_A, [text("t1"), rect("r1")])],
     currentPageIndex: index,
     selectedId: null,
+    selectedIds: [],
     editingId: null,
     croppingId: null,
     clipboard: null,
@@ -429,7 +430,7 @@ test("store: exportToJSON writes ALL pages (native v3) and loadFromJSON reads th
   assert.deepEqual(warnings, []);
   const file = JSON.parse(json) as CanvasDocument;
   assert.equal(file.version, SCHEMA_VERSION);
-  assert.equal(file.version, 3);
+  assert.equal(file.version, 4);
   assert.equal(file.pages.length, 3);
   assert.deepEqual(file.pages.map((p) => p.canvas.width), [900, 640, 300]);
   assert.ok(!("elements" in file) && !("canvas" in file), "no second copy of page 1 at the top level");
@@ -496,7 +497,7 @@ test("store: reset() leaves one blank page and is undoable", async () => {
 
 // ================================================== adapter: pages <-> Polotno
 test("adapter: a document of several pages goes to Polotno and back unchanged", () => {
-  const doc: CanvasDocument = { version: 3, pages: threePages() };
+  const doc: CanvasDocument = { version: SCHEMA_VERSION, pages: threePages() };
   const polotno = convertKusukaToPolotno(doc);
   assert.equal(polotno.pages.length, 3);
   assert.equal(polotno.pages[2].children!.length, 1);
@@ -544,7 +545,7 @@ test("adapter: every page of a Polotno file is imported — the 'first page only
     ],
   };
   const r = convertPolotnoToKusuka(doc);
-  assert.equal(r.document.version, 3);
+  assert.equal(r.document.version, 4);
   assert.deepEqual(r.document.pages.map((p) => p.id), ["one", "two", "three"]);
   assert.deepEqual(r.document.pages.map((p) => p.elements.length), [2, 1, 0]);
   assert.deepEqual(r.document.pages.map((p) => [p.canvas.width, p.canvas.height, p.canvas.backgroundColor]), [
@@ -614,7 +615,7 @@ test("adapter: native v1 and v2 files open as one page; v3 pages are read in ord
   });
   assert.ok(!("error" in v2));
   if (!("error" in v2)) {
-    assert.equal(v2.document.version, 3);
+    assert.equal(v2.document.version, 4);
     assert.equal(v2.document.pages.length, 1);
     assert.deepEqual(v2.warnings, []);
     assert.ok(v2.document.pages[0].id.length > 0);
@@ -657,17 +658,18 @@ test("adapter: a native v3 file with no pages opens as one blank page, with a wa
 });
 
 test("adapter: a file from a newer version is refused with a clear message", () => {
-  const r = parseDocument({ version: 4, pages: [] });
+  const r = parseDocument({ version: SCHEMA_VERSION + 1, pages: [] });
   assert.ok(!r.ok);
-  assert.match(r.ok ? "" : r.error, /v4/);
+  assert.match(r.ok ? "" : r.error, new RegExp(`v${SCHEMA_VERSION + 1}`));
 });
 
-test("adapter: a native v3 document is idempotent (parse -> write -> parse)", () => {
-  const doc: CanvasDocument = { version: 3, pages: threePages() };
+test("adapter: a native v3 document is idempotent (parse -> write -> parse), silently read as v4", () => {
+  const doc = { version: 3, pages: threePages() };
   const a = parseDocument(JSON.parse(JSON.stringify(doc)));
   assert.ok(a.ok);
   if (!a.ok) return;
-  assert.deepEqual(a.document, doc);
+  assert.deepEqual(a.warnings, []);
+  assert.deepEqual(a.document, { ...doc, version: SCHEMA_VERSION });
   const b = parseDocument(JSON.stringify(a.document));
   assert.ok(b.ok && JSON.stringify(b.document) === JSON.stringify(a.document));
 });

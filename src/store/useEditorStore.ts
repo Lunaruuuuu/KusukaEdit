@@ -21,7 +21,7 @@ import {
   type LoadResult,
 } from "@/lib/polotnoAdapter";
 import { normalizeColor } from "@/lib/color";
-import { clampDimension, fitImageToCanvas } from "@/lib/workspace";
+import { clampDimension, fitElementToPage, fitImageToCanvas } from "@/lib/workspace";
 import { cropPatchChanges, resetCrop, sanitizeCropPatch, type CropPatch } from "@/lib/crop";
 import { topLeftForCentre, type Point } from "@/lib/dropImage";
 import {
@@ -40,7 +40,12 @@ import {
   indexAfterDelete,
   isPageIndex,
 } from "@/lib/pages";
-import { applyImageStylePatch, type ImageStylePatch } from "@/lib/imageStyle";
+import {
+  applyElementStylePatch,
+  applyImageStylePatch,
+  type ElementStylePatch,
+  type ImageStylePatch,
+} from "@/lib/imageStyle";
 import { selectCurrentPage } from "@/store/selectors";
 
 /** A picture that has been loaded and measured, ready to become an element. */
@@ -76,7 +81,7 @@ type ReorderDirection = "front" | "back" | "forward" | "backward";
 // ---------------------------------------------------------------------------
 // A snapshot captures the *document* — every page (canvas meta + elements) —
 // and which page was active when it was taken, so Undo takes you to the page
-// where the change happened. It never captures `selectedId` (selection isn't
+// where the change happened. It never captures `selectedId` / `selectedIds` (selection isn't
 // something a user expects "Undo" to restore), `clipboard`, `editingId`,
 // `croppingId` or `stageNode` (a Konva.Stage instance isn't data).
 // Switching pages is NOT a history step either: it changes what you look at,
@@ -118,6 +123,16 @@ export interface EditorState {
   pages: Page[];
   /** Which page is being edited (always a valid index into `pages`). */
   currentPageIndex: number;
+  /**
+   * Every selected element of the active page, in the order they were picked
+   * (click, Ctrl/Cmd+click, marquee). View state, never in history.
+   */
+  selectedIds: string[];
+  /**
+   * The ONE selected element, or null when nothing or several elements are
+   * selected. What the single-element UI (toolbar, crop, text editing, copy)
+   * works on. Always equal to selectedIds[0] when selectedIds has one entry.
+   */
   selectedId: string | null;
 
   // Element copied with Ctrl+C, waiting for Ctrl+V. Not part of the document
@@ -180,7 +195,12 @@ export interface EditorState {
   setCanvasMeta: (meta: Partial<CanvasMeta>, options?: CanvasMetaOptions) => void;
 
   // selection
+  /** Selects one element (or nothing, with null). */
   setSelectedId: (id: string | null) => void;
+  /** Selects exactly these elements of the active page (unknown ids are ignored). */
+  setSelection: (ids: string[]) => void;
+  /** Ctrl/Cmd+click: adds the element to the selection, or takes it out when it is in already. */
+  toggleSelected: (id: string) => void;
 
   // element CRUD (all on the active page)
   addTextElement: (preset?: "title" | "subtitle" | "paragraph") => void;
@@ -206,9 +226,29 @@ export interface EditorState {
    * step, like updateElement.
    */
   setImageStyle: (id: string, patch: ImageStylePatch) => void;
+  /**
+   * The same for any element: opacity and shadow for every type, the border
+   * (stroke) for text and shapes, and all of the picture fields for a picture.
+   * Keys an element does not take are ignored. Collapses like setImageStyle.
+   */
+  setElementStyle: (id: string, patch: ElementStylePatch) => void;
+  /** Mirrors a picture inside its box, horizontally (x) or vertically (y). One undo step. */
+  flipImage: (id: string, axis: "x" | "y") => void;
+  /**
+   * Scales an element proportionally to the largest size that fits the page,
+   * centred, upright. One undo step; nothing happens when it already fits that way.
+   */
+  fitToPage: (id: string) => void;
   /** Swaps the picture of an image element, keeping its position and width. */
   replaceImageSource: (id: string, image: ImageSource) => void;
+  /** A field set to `undefined` in `attrs` is removed from the element. */
   updateElement: (id: string, attrs: Partial<CanvasElement>) => void;
+  /**
+   * Several elements changed by ONE gesture (moving or transforming a multiple
+   * selection): one undo step for all of them. `batchKey` groups the calls of
+   * that gesture, like the element id does for updateElement.
+   */
+  updateElements: (changes: Array<{ id: string; attrs: Partial<CanvasElement> }>, batchKey: string) => void;
   /** Layout-derived height of an auto-height text node. Never creates an undo step. */
   syncMeasuredHeight: (id: string, height: number) => void;
   removeElement: (id: string) => void;
@@ -251,7 +291,21 @@ function withElements(state: EditorState, change: (elements: CanvasElement[]) =>
 }
 
 /** Cleared on every page change and on every Undo/Redo. */
-const NO_SELECTION = { selectedId: null, editingId: null, croppingId: null } as const;
+const NO_SELECTION = { selectedId: null, selectedIds: [] as string[], editingId: null, croppingId: null };
+
+/** The selection fields for exactly `ids` (already checked to be on the active page). */
+function selectionOf(ids: string[]): Pick<EditorState, "selectedIds" | "selectedId"> {
+  return { selectedIds: ids, selectedId: ids.length === 1 ? ids[0] : null };
+}
+
+/** `attrs` applied to `el`; a field set to `undefined` is removed instead of kept as undefined. */
+function applyAttrs(el: CanvasElement, attrs: Partial<CanvasElement>): CanvasElement {
+  const next = { ...el, ...attrs } as Record<string, unknown>;
+  for (const key of Object.keys(attrs)) {
+    if (next[key] === undefined) delete next[key];
+  }
+  return next as unknown as CanvasElement;
+}
 
 export const useEditorStore = create<EditorState>((set, get) => {
   // -------------------------------------------------------------------
@@ -373,6 +427,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     pages: [createBlankPage(DEFAULT_CANVAS)],
     currentPageIndex: 0,
     selectedId: null,
+    selectedIds: [],
     clipboard: null,
     editingId: null,
     croppingId: null,
@@ -391,8 +446,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
         if (id === null) return state.croppingId === null ? state : { croppingId: null };
         const target = selectCurrentPage(state).elements.find((e) => e.id === id);
         if (!target || target.type !== "image") return state; // only a picture can be cropped
-        // Cropping works on the selected picture; it also ends any text editing.
-        return { croppingId: id, selectedId: id, editingId: null };
+        // Cropping works on the selected picture (alone); it also ends any text editing.
+        return { croppingId: id, ...selectionOf([id]), editingId: null };
       }),
 
     undo: () => {
@@ -545,10 +600,31 @@ export const useEditorStore = create<EditorState>((set, get) => {
     // restore what the design looks like, not which handle was active.
     setSelectedId: (id) =>
       set((state) => ({
-        selectedId: id,
+        ...selectionOf(id === null ? [] : [id]),
         // Selecting something else (or nothing) ends cropping.
         croppingId: state.croppingId === id ? state.croppingId : null,
       })),
+
+    setSelection: (ids) =>
+      set((state) => {
+        const onPage = new Set(selectCurrentPage(state).elements.map((e) => e.id));
+        const next = Array.from(new Set(ids)).filter((id) => onPage.has(id));
+        const same =
+          next.length === state.selectedIds.length && next.every((id, i) => id === state.selectedIds[i]);
+        if (same) return state; // a marquee fires this on every mouse move
+        const sel = selectionOf(next);
+        return {
+          ...sel,
+          // Cropping and text editing belong to one selected element.
+          croppingId: state.croppingId !== null && state.croppingId === sel.selectedId ? state.croppingId : null,
+          editingId: state.editingId !== null && state.editingId === sel.selectedId ? state.editingId : null,
+        };
+      }),
+
+    toggleSelected: (id) => {
+      const { selectedIds, setSelection } = get();
+      setSelection(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]);
+    },
 
     addTextElement: (preset = "paragraph") => {
       recordHistoryNow();
@@ -571,7 +647,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         fontStyle: "normal",
         lineHeight: NEW_TEXT_LINE_HEIGHT,
       };
-      set((state) => ({ ...withElements(state, (list) => [...list, el]), selectedId: el.id }));
+      set((state) => ({ ...withElements(state, (list) => [...list, el]), ...selectionOf([el.id]) }));
     },
 
     addShapeElement: (shapeType) => {
@@ -594,7 +670,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         strokeWidth: 2,
         cornerRadius: shapeType === "rect" ? 4 : 0,
       };
-      set((state) => ({ ...withElements(state, (list) => [...list, el]), selectedId: el.id }));
+      set((state) => ({ ...withElements(state, (list) => [...list, el]), ...selectionOf([el.id]) }));
     },
 
     addImageElement: ({ src, naturalWidth, naturalHeight, vector }, options) => {
@@ -629,7 +705,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       // progress on another element ends.
       set((state) => ({
         ...withElements(state, (list) => [...list, el]),
-        selectedId: el.id,
+        ...selectionOf([el.id]),
         editingId: null,
         croppingId: null,
       }));
@@ -667,6 +743,40 @@ export const useEditorStore = create<EditorState>((set, get) => {
           list.map((e) => (e.id === id && e.type === "image" ? applyImageStylePatch(e, patch) : e))
         )
       );
+    },
+
+    setElementStyle: (id, patch) => {
+      const target = findOnCurrentPage(id);
+      if (!target) return;
+      // Nothing would change (or nothing is usable): no undo step either.
+      if (applyElementStylePatch(target, patch) === target) return;
+      recordHistoryDebounced(id);
+      set((state) =>
+        withElements(state, (list) => list.map((e) => (e.id === id ? applyElementStylePatch(e, patch) : e)))
+      );
+    },
+
+    flipImage: (id, axis) => {
+      const target = findOnCurrentPage(id);
+      if (!target || target.type !== "image") return;
+      recordHistoryNow();
+      set((state) =>
+        withElements(state, (list) =>
+          list.map((e) => {
+            if (e.id !== id || e.type !== "image") return e;
+            return axis === "x" ? { ...e, scaleX: e.scaleX === -1 ? 1 : -1 } : { ...e, scaleY: e.scaleY === -1 ? 1 : -1 };
+          })
+        )
+      );
+    },
+
+    fitToPage: (id) => {
+      const target = findOnCurrentPage(id);
+      if (!target) return;
+      const box = fitElementToPage(target, selectCurrentPage(get()).canvas);
+      if (!box) return; // already fills the page that way
+      recordHistoryNow();
+      set((state) => withElements(state, (list) => list.map((e) => (e.id === id ? applyAttrs(e, box) : e))));
     },
 
     replaceImageSource: (id, { src, naturalWidth, naturalHeight, vector }) => {
@@ -708,9 +818,19 @@ export const useEditorStore = create<EditorState>((set, get) => {
     // debounced recorder rather than creating one history entry per call.
     updateElement: (id, attrs) => {
       recordHistoryDebounced(id);
+      set((state) => withElements(state, (list) => list.map((el) => (el.id === id ? applyAttrs(el, attrs) : el))));
+    },
+
+    updateElements: (changes, batchKey) => {
+      if (changes.length === 0) return;
+      recordHistoryDebounced(batchKey);
+      const byId = new Map(changes.map((c) => [c.id, c.attrs]));
       set((state) =>
         withElements(state, (list) =>
-          list.map((el) => (el.id === id ? ({ ...el, ...attrs } as CanvasElement) : el))
+          list.map((el) => {
+            const attrs = byId.get(el.id);
+            return attrs ? applyAttrs(el, attrs) : el;
+          })
         )
       );
     },
@@ -729,7 +849,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       recordHistoryNow();
       set((state) => ({
         ...withElements(state, (list) => list.filter((el) => el.id !== id)),
-        selectedId: state.selectedId === id ? null : state.selectedId,
+        ...selectionOf(state.selectedIds.filter((x) => x !== id)),
         editingId: state.editingId === id ? null : state.editingId,
         croppingId: state.croppingId === id ? null : state.croppingId,
       }));
@@ -738,9 +858,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
       releaseOrphanUrls();
     },
 
+    // Every selected element goes, in ONE undo step.
     removeSelected: () => {
-      const { selectedId, removeElement } = get();
-      if (selectedId) removeElement(selectedId);
+      const { selectedIds, removeElement } = get();
+      if (selectedIds.length === 0) return;
+      if (selectedIds.length === 1) {
+        removeElement(selectedIds[0]);
+        return;
+      }
+      recordHistoryNow();
+      const gone = new Set(selectedIds);
+      set((state) => ({
+        ...withElements(state, (list) => list.filter((el) => !gone.has(el.id))),
+        ...NO_SELECTION,
+      }));
+      releaseOrphanUrls();
     },
 
     // -------------------------------------------------------------------
@@ -770,7 +902,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
       set((state) => ({
         ...withElements(state, (list) => [...list, copy]),
-        selectedId: copy.id,
+        ...selectionOf([copy.id]),
         // The clipboard now remembers the pasted position, so pressing
         // Ctrl+V repeatedly cascades (+20, +40, +60 ...) instead of
         // stacking every copy on the same spot.
@@ -823,12 +955,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     // Arrow-key nudging reuses updateElement, so a burst of key-repeats
     // while the key is held down also collapses into one undo step.
+    // A multiple selection moves together, as one undo step per key burst.
     nudgeSelected: (dx, dy) => {
-      const { selectedId } = get();
-      if (!selectedId) return;
-      const el = findOnCurrentPage(selectedId);
-      if (!el) return;
-      get().updateElement(selectedId, { x: el.x + dx, y: el.y + dy });
+      const { selectedIds } = get();
+      const changes = selectedIds
+        .map((id) => findOnCurrentPage(id))
+        .filter((el): el is CanvasElement => el !== undefined)
+        .map((el) => ({ id: el.id, attrs: { x: el.x + dx, y: el.y + dy } }));
+      if (changes.length === 1) get().updateElement(changes[0].id, changes[0].attrs);
+      else get().updateElements(changes, `selection:${selectedIds.join(",")}`);
     },
 
     // -------------------------------------------------------------------

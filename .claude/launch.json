@@ -1,0 +1,22 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev-docker",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": [
+        "run", "--rm", "--name", "kusuka-dev",
+        "-p", "3000:3000",
+        "-e", "WATCHPACK_POLLING=true",
+        "-e", "NEXT_TELEMETRY_DISABLED=1",
+        "-v", "C:/Users/Ryu Nakata/Documents/Kulyeah/Magang/canvas-editor:/app",
+        "-v", "kusuka_nm:/app/node_modules",
+        "-v", "kusuka_next:/app/.next",
+        "-w", "/app",
+        "node:24-slim",
+        "npx", "next", "dev", "-H", "0.0.0.0", "-p", "3000"
+      ],
+      "port": 3000
+    }
+  ]
+}

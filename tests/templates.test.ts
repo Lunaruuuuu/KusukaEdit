@@ -52,7 +52,7 @@ for (const tpl of TEMPLATES) {
     // a bundled template must open clean: nothing it uses may be unsupported
     assert.deepEqual(parsed.warnings, [], `${tpl.id} opens with warnings`);
     const doc = parsed.document;
-    assert.equal(doc.version, 3);
+    assert.equal(doc.version, 4);
     assert.ok(doc.pages.length >= 1);
     const allIds: string[] = [];
     for (const page of doc.pages) {

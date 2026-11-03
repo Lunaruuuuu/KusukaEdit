@@ -244,6 +244,7 @@ test("store: setImageStyle — a slider drag is ONE undo step, a no-op records n
     pages: [mkPage("p", { width: 900, height: 600, backgroundColor: "#ffffff" }, [pic()])],
     currentPageIndex: 0,
     selectedId: null,
+    selectedIds: [],
     editingId: null,
     croppingId: null,
     clipboard: null,
