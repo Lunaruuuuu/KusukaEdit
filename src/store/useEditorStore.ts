@@ -8,6 +8,7 @@ import {
   type CanvasElement,
   type CanvasMeta,
   type ImageElement,
+  type Page,
   type ShapeElement,
   type ShapeKind,
   type TextElement,
@@ -21,6 +22,8 @@ import {
 } from "@/lib/polotnoAdapter";
 import { normalizeColor } from "@/lib/color";
 import { clampDimension, fitImageToCanvas } from "@/lib/workspace";
+import { cropPatchChanges, resetCrop, sanitizeCropPatch, type CropPatch } from "@/lib/crop";
+import { topLeftForCentre, type Point } from "@/lib/dropImage";
 import {
   hasTrackedObjectUrls,
   releaseUnreferencedObjectUrls,
@@ -28,6 +31,17 @@ import {
 } from "@/lib/objectUrls";
 import { evictImage } from "@/lib/imageCache";
 import { embedObjectUrls } from "@/lib/imageData";
+import {
+  clampPageIndex,
+  clonePages,
+  collectImageSources,
+  createBlankPage,
+  duplicatePageData,
+  indexAfterDelete,
+  isPageIndex,
+} from "@/lib/pages";
+import { applyImageStylePatch, type ImageStylePatch } from "@/lib/imageStyle";
+import { selectCurrentPage } from "@/store/selectors";
 
 /** A picture that has been loaded and measured, ready to become an element. */
 export interface ImageSource {
@@ -44,18 +58,41 @@ export interface ExportResult {
   warnings: string[];
 }
 
+/** Progress of a multi-page image export (view state; null = no export running). */
+export interface BatchProgress {
+  done: number;
+  total: number;
+}
+
+export interface CanvasMetaOptions {
+  /** Apply the change to every page instead of only the active one. */
+  allPages?: boolean;
+}
+
 type ReorderDirection = "front" | "back" | "forward" | "backward";
 
 // ---------------------------------------------------------------------------
 // History (Undo / Redo)
 // ---------------------------------------------------------------------------
-// A snapshot only ever captures the two pieces of state that make up the
-// *document* (canvas meta + elements) — never `selectedId` (selection isn't
-// something a user expects "Undo" to restore), never `clipboard`, never
-// `editingId` and never `stageNode` (a Konva.Stage instance isn't data).
+// A snapshot captures the *document* — every page (canvas meta + elements) —
+// and which page was active when it was taken, so Undo takes you to the page
+// where the change happened. It never captures `selectedId` (selection isn't
+// something a user expects "Undo" to restore), `clipboard`, `editingId`,
+// `croppingId` or `stageNode` (a Konva.Stage instance isn't data).
+// Switching pages is NOT a history step either: it changes what you look at,
+// not the document.
 interface HistorySnapshot {
-  canvas: CanvasMeta;
-  elements: CanvasElement[];
+  pages: Page[];
+  /** The page to show when this snapshot is restored. */
+  currentPageIndex: number;
+  /**
+   * The page to show when the same step is walked in the OTHER direction (redo
+   * after an undo, undo after a redo). Only set by steps that change which
+   * page is shown — add, duplicate, delete, import, clear — so that Redo of
+   * "add page" lands on the new page. Without it, the page where the change
+   * was made is shown, which is right for every edit.
+   */
+  afterPageIndex?: number;
 }
 
 const MAX_HISTORY = 50;
@@ -68,23 +105,23 @@ const HISTORY_DEBOUNCE_MS = 500;
 // Where a pasted element lands relative to the one it was copied from.
 const PASTE_OFFSET = 20;
 
-function cloneSnapshot(canvas: CanvasMeta, elements: CanvasElement[]): HistorySnapshot {
+function cloneSnapshot(pages: readonly Page[], currentPageIndex: number, afterPageIndex?: number): HistorySnapshot {
   // Structural clone, not a reference copy — otherwise a later in-place
-  // mutation of `elements` would silently corrupt the snapshot sitting in
-  // the history stack.
-  return {
-    canvas: { ...canvas },
-    elements: elements.map((el) => ({ ...el })),
-  };
+  // mutation would silently corrupt the snapshot sitting in the history stack.
+  const snap: HistorySnapshot = { pages: clonePages(pages), currentPageIndex };
+  if (afterPageIndex !== undefined) snap.afterPageIndex = afterPageIndex;
+  return snap;
 }
 
-interface EditorState {
-  canvas: CanvasMeta;
-  elements: CanvasElement[];
+export interface EditorState {
+  /** The document: one or more pages. Never empty. */
+  pages: Page[];
+  /** Which page is being edited (always a valid index into `pages`). */
+  currentPageIndex: number;
   selectedId: string | null;
 
   // Element copied with Ctrl+C, waiting for Ctrl+V. Not part of the document
-  // and never touched by undo/redo.
+  // and never touched by undo/redo. It can be pasted on any page.
   clipboard: CanvasElement | null;
   copySelected: () => boolean;
   pasteClipboard: () => boolean;
@@ -93,6 +130,13 @@ interface EditorState {
   // While set, global keyboard shortcuts are suspended and the Konva node is hidden.
   editingId: string | null;
   setEditingId: (id: string | null) => void;
+
+  // Id of the picture currently being cropped (CropOverlay is open over it).
+  // Like editingId: view state, never in history. While set, the Konva node is
+  // hidden behind the overlay and the global shortcuts are suspended. Only a
+  // picture can be cropped, and only while it is the selected element.
+  croppingId: string | null;
+  setCroppingId: (id: string | null) => void;
 
   // the live Konva.Stage instance, registered by CanvasWorkspace once it
   // mounts. Not part of the document and never touched by undo/redo — it
@@ -106,24 +150,62 @@ interface EditorState {
   // document happens to have the same size as the old one. Never in history.
   loadRevision: number;
 
+  // Set while a "all pages" image export walks through the pages. View state:
+  // the canvas shows a progress cover and ignores input while it is set.
+  exportProgress: BatchProgress | null;
+  setExportProgress: (progress: BatchProgress | null) => void;
+
   // history stacks (exposed read-only; mutate only through undo/redo below)
   past: HistorySnapshot[];
   future: HistorySnapshot[];
   undo: () => void;
   redo: () => void;
 
-  // canvas meta (size is clamped to CANVAS_LIMITS; repeated calls, e.g. a
-  // dragged color picker, collapse into one undo step)
-  setCanvasMeta: (meta: Partial<CanvasMeta>) => void;
+  // ---- pages ----
+  /**
+   * Shows another page. Not an undo step. The selection (selectedId, the
+   * Transformer, an open text editor or crop) is reset: an element of one page
+   * must never stay "selected" on another.
+   */
+  goToPage: (index: number) => void;
+  /** Inserts an empty page after the active one (same size and background) and shows it. */
+  addPage: () => void;
+  /** Copies a page (default: the active one) with all its elements, right after it, and shows the copy. */
+  duplicatePage: (index?: number) => void;
+  /** Removes a page (default: the active one). The last remaining page cannot be deleted; returns false then. */
+  deletePage: (index?: number) => boolean;
+
+  // canvas meta of the ACTIVE page (size is clamped to CANVAS_LIMITS; repeated
+  // calls, e.g. a dragged color picker, collapse into one undo step)
+  setCanvasMeta: (meta: Partial<CanvasMeta>, options?: CanvasMetaOptions) => void;
 
   // selection
   setSelectedId: (id: string | null) => void;
 
-  // element CRUD
+  // element CRUD (all on the active page)
   addTextElement: (preset?: "title" | "subtitle" | "paragraph") => void;
   addShapeElement: (shapeType: ShapeKind) => void;
-  /** Places an uploaded picture, centred and fitted inside the canvas. */
-  addImageElement: (image: ImageSource) => void;
+  /**
+   * Places an uploaded picture, fitted inside the canvas. Centred on the canvas,
+   * or — for a picture dropped on the canvas — centred on `options.at`, a point
+   * in DESIGN pixels (the cursor, converted by lib/dropImage).
+   */
+  addImageElement: (image: ImageSource, options?: { at?: Point }) => void;
+  /**
+   * Applies a crop gesture (see lib/crop.ts): the new visible part of the
+   * picture and the box that shows it. One call = one undo step; a patch that
+   * changes nothing, or is not valid, does nothing.
+   */
+  setImageCrop: (id: string, patch: CropPatch) => void;
+  /** Shows the whole picture again (at the size it has now). One undo step. */
+  resetImageCrop: (id: string) => void;
+  /**
+   * Changes the look of a picture: filter (brightness, contrast, saturation,
+   * preset), blur, corner radius, shadow, border, mask. A field set to
+   * `undefined` is removed. Continuous (slider) edits collapse into one undo
+   * step, like updateElement.
+   */
+  setImageStyle: (id: string, patch: ImageStylePatch) => void;
   /** Swaps the picture of an image element, keeping its position and width. */
   replaceImageSource: (id: string, image: ImageSource) => void;
   updateElement: (id: string, attrs: Partial<CanvasElement>) => void;
@@ -136,6 +218,7 @@ interface EditorState {
 
   // serialization. Async because uploaded pictures (temporary blob: URLs) are
   // read back and embedded as data: URLs so the file works after a refresh.
+  // The WHOLE document (every page) is written to one file.
   exportToJSON: (format?: ExportFormat) => Promise<ExportResult>;
   loadFromJSON: (jsonData: string | unknown) => LoadResult;
   reset: () => void;
@@ -152,6 +235,23 @@ const TEXT_PRESETS: Record<"title" | "subtitle" | "paragraph", { text: string; f
 };
 
 const NEW_TEXT_LINE_HEIGHT = 1.2;
+
+type PagesPatch = Pick<EditorState, "pages">;
+
+/** `state.pages` with the ACTIVE page replaced by `change(page)`. */
+function withCurrentPage(state: EditorState, change: (page: Page) => Page): PagesPatch {
+  return {
+    pages: state.pages.map((page, i) => (i === state.currentPageIndex ? change(page) : page)),
+  };
+}
+
+/** `state.pages` with the elements of the ACTIVE page replaced by `change(elements)`. */
+function withElements(state: EditorState, change: (elements: CanvasElement[]) => CanvasElement[]): PagesPatch {
+  return withCurrentPage(state, (page) => ({ ...page, elements: change(page.elements) }));
+}
+
+/** Cleared on every page change and on every Undo/Redo. */
+const NO_SELECTION = { selectedId: null, editingId: null, croppingId: null } as const;
 
 export const useEditorStore = create<EditorState>((set, get) => {
   // -------------------------------------------------------------------
@@ -181,25 +281,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
   //
   // A picture's blob: URL must outlive the element that shows it, because
   // Undo can bring that element back. So it is revoked only when NOTHING that
-  // could still draw it refers to it: not the current elements, not any
+  // could still draw it refers to it: not the pages of the document, not any
   // undo/redo snapshot, not the batch snapshot still waiting to be sealed,
-  // and not the clipboard. Deleting or replacing a picture therefore frees
-  // its memory as soon as it is gone for good — i.e. when it falls out of the
-  // history — never earlier.
+  // and not the clipboard. Deleting or replacing a picture (or a whole page)
+  // therefore frees its memory as soon as it is gone for good — i.e. when it
+  // falls out of the history — never earlier.
   //
   // Called after every change that can drop a reference.
   // -------------------------------------------------------------------
   function releaseOrphanUrls() {
     if (!hasTrackedObjectUrls()) return; // nothing was ever uploaded: free
-    const { elements, past, future, clipboard } = get();
-    const referenced = new Set<string>();
-    const collect = (list: CanvasElement[]) => {
-      for (const el of list) if (el.type === "image") referenced.add(el.src);
-    };
-    collect(elements);
-    past.forEach((snap) => collect(snap.elements));
-    future.forEach((snap) => collect(snap.elements));
-    if (pendingSnapshot) collect(pendingSnapshot.elements);
+    const { pages, past, future, clipboard } = get();
+    const referenced = collectImageSources(pages);
+    past.forEach((snap) => collectImageSources(snap.pages).forEach((src) => referenced.add(src)));
+    future.forEach((snap) => collectImageSources(snap.pages).forEach((src) => referenced.add(src)));
+    if (pendingSnapshot) collectImageSources(pendingSnapshot.pages).forEach((src) => referenced.add(src));
     if (clipboard && clipboard.type === "image") referenced.add(clipboard.src);
 
     releaseUnreferencedObjectUrls(referenced).forEach(evictImage);
@@ -227,13 +323,25 @@ export const useEditorStore = create<EditorState>((set, get) => {
     // Flush first so this discrete step never gets merged into an
     // unrelated in-flight drag/typing burst.
     sealPendingSnapshot();
-    const { canvas, elements } = get();
-    const snap = cloneSnapshot(canvas, elements);
+    const { pages, currentPageIndex } = get();
+    const snap = cloneSnapshot(pages, currentPageIndex);
     set((state) => ({
       past: [...state.past, snap].slice(-MAX_HISTORY),
       future: [],
     }));
     releaseOrphanUrls();
+  }
+
+  /**
+   * Tells the step recorded by the last recordHistoryNow() which page the
+   * change left on screen (see HistorySnapshot.afterPageIndex).
+   */
+  function markViewAfterLastStep(pageIndex: number) {
+    set((state) => {
+      const last = state.past[state.past.length - 1];
+      if (!last) return state;
+      return { past: [...state.past.slice(0, -1), { ...last, afterPageIndex: pageIndex }] };
+    });
   }
 
   /**
@@ -248,102 +356,203 @@ export const useEditorStore = create<EditorState>((set, get) => {
       sealPendingSnapshot();
     }
     if (!pendingSnapshot) {
-      const { canvas, elements } = get();
-      pendingSnapshot = cloneSnapshot(canvas, elements);
+      const { pages, currentPageIndex } = get();
+      pendingSnapshot = cloneSnapshot(pages, currentPageIndex);
       pendingBatchKey = batchKey;
     }
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(sealPendingSnapshot, HISTORY_DEBOUNCE_MS);
   }
 
+  /** The element with `id` on the active page. */
+  function findOnCurrentPage(id: string): CanvasElement | undefined {
+    return selectCurrentPage(get()).elements.find((e) => e.id === id);
+  }
+
   return {
-    canvas: { ...DEFAULT_CANVAS },
-    elements: [],
+    pages: [createBlankPage(DEFAULT_CANVAS)],
+    currentPageIndex: 0,
     selectedId: null,
     clipboard: null,
     editingId: null,
+    croppingId: null,
     stageNode: null,
     loadRevision: 0,
+    exportProgress: null,
     past: [],
     future: [],
 
     setStageNode: (stage) => set({ stageNode: stage }),
     setEditingId: (id) => set({ editingId: id }),
+    setExportProgress: (progress) => set({ exportProgress: progress }),
+
+    setCroppingId: (id) =>
+      set((state) => {
+        if (id === null) return state.croppingId === null ? state : { croppingId: null };
+        const target = selectCurrentPage(state).elements.find((e) => e.id === id);
+        if (!target || target.type !== "image") return state; // only a picture can be cropped
+        // Cropping works on the selected picture; it also ends any text editing.
+        return { croppingId: id, selectedId: id, editingId: null };
+      }),
 
     undo: () => {
       // Finish sealing whatever burst is in flight first, so the stacks
       // are consistent before we pop from them.
       sealPendingSnapshot();
-      const { past, future, canvas, elements } = get();
+      const { past, future, pages } = get();
       if (past.length === 0) return;
       const previous = past[past.length - 1];
-      const currentSnap = cloneSnapshot(canvas, elements);
+      // Redo shows the page the step ended on: the one it created (add /
+      // duplicate), or else the page where the change was made.
+      const redoView = clampPageIndex(previous.afterPageIndex ?? previous.currentPageIndex, pages.length);
+      const currentSnap = cloneSnapshot(pages, redoView, previous.currentPageIndex);
       set({
         past: past.slice(0, -1),
         future: [currentSnap, ...future].slice(0, MAX_HISTORY),
-        canvas: previous.canvas,
-        elements: previous.elements,
-        selectedId: null,
-        editingId: null,
+        pages: previous.pages,
+        currentPageIndex: clampPageIndex(previous.currentPageIndex, previous.pages.length),
+        ...NO_SELECTION,
       });
       releaseOrphanUrls(); // `future` is capped, so a snapshot may have just fallen off
     },
 
     redo: () => {
       sealPendingSnapshot();
-      const { past, future, canvas, elements } = get();
+      const { past, future, pages } = get();
       if (future.length === 0) return;
       const next = future[0];
-      const currentSnap = cloneSnapshot(canvas, elements);
+      // Undo, again, shows the page the step was made on.
+      const undoView = clampPageIndex(next.afterPageIndex ?? next.currentPageIndex, pages.length);
+      const currentSnap = cloneSnapshot(pages, undoView, next.currentPageIndex);
       set({
         future: future.slice(1),
         past: [...past, currentSnap].slice(-MAX_HISTORY),
-        canvas: next.canvas,
-        elements: next.elements,
-        selectedId: null,
-        editingId: null,
+        pages: next.pages,
+        currentPageIndex: clampPageIndex(next.currentPageIndex, next.pages.length),
+        ...NO_SELECTION,
       });
       releaseOrphanUrls();
     },
 
-    // Workspace size / background. Whatever the caller passes is made safe
-    // here, so no UI can put the canvas into a state Konva cannot draw:
-    // sizes are whole pixels within CANVAS_LIMITS, NaN/Infinity are ignored,
-    // and the color is normalized to #rrggbb (or "transparent").
+    // -------------------------------------------------------------------
+    // Pages
+    // -------------------------------------------------------------------
+    goToPage: (index) => {
+      const { pages, currentPageIndex } = get();
+      if (!isPageIndex(index, pages.length) || index === currentPageIndex) return;
+      // Finish any drag/typing burst on the page we are leaving, so it can
+      // never be merged into an edit made on the next page.
+      sealPendingSnapshot();
+      set({ currentPageIndex: index, ...NO_SELECTION });
+    },
+
+    addPage: () => {
+      recordHistoryNow();
+      set((state) => {
+        const blank = createBlankPage(selectCurrentPage(state).canvas);
+        const at = state.currentPageIndex + 1;
+        return {
+          pages: [...state.pages.slice(0, at), blank, ...state.pages.slice(at)],
+          currentPageIndex: at,
+          ...NO_SELECTION,
+        };
+      });
+      markViewAfterLastStep(get().currentPageIndex); // Redo lands on the new page
+    },
+
+    duplicatePage: (index) => {
+      const { pages, currentPageIndex } = get();
+      const from = index === undefined ? currentPageIndex : index;
+      if (!isPageIndex(from, pages.length)) return;
+      recordHistoryNow();
+      set((state) => {
+        const copy = duplicatePageData(state.pages[from]);
+        const at = from + 1;
+        return {
+          pages: [...state.pages.slice(0, at), copy, ...state.pages.slice(at)],
+          currentPageIndex: at,
+          ...NO_SELECTION,
+        };
+      });
+      markViewAfterLastStep(get().currentPageIndex); // Redo lands on the copy
+      // A copied picture shares its URL with the original: both keep it alive.
+      releaseOrphanUrls();
+    },
+
+    deletePage: (index) => {
+      const { pages, currentPageIndex } = get();
+      const target = index === undefined ? currentPageIndex : index;
+      // A document always has a page: the last one cannot be deleted.
+      if (pages.length <= 1 || !isPageIndex(target, pages.length)) return false;
+      recordHistoryNow();
+      set((state) => ({
+        pages: state.pages.filter((_, i) => i !== target),
+        currentPageIndex: indexAfterDelete(state.currentPageIndex, target, state.pages.length - 1),
+        ...NO_SELECTION,
+      }));
+      markViewAfterLastStep(get().currentPageIndex);
+      // The deleted page is still in the history snapshot just recorded, so
+      // Undo works; its pictures are revoked once that snapshot is gone.
+      releaseOrphanUrls();
+      return true;
+    },
+
+    // Workspace size / background of the active page (or of every page). Whatever
+    // the caller passes is made safe here, so no UI can put the canvas into a
+    // state Konva cannot draw: sizes are whole pixels within CANVAS_LIMITS,
+    // NaN/Infinity are ignored, and the color is normalized to #rrggbb (or
+    // "transparent").
     //
     // Goes through the debounced history path (batch key "canvas"): typing a
     // size or dragging the color picker produces one undo step, not dozens.
-    // The Stage, the background rect and stage.toDataURL() all read this
-    // object, so a change here is immediately the new working area AND the
+    // The Stage, the background rect and stage.toDataURL() all read the page's
+    // canvas, so a change here is immediately the new working area AND the
     // new export size.
-    setCanvasMeta: (meta) => {
-      const current = get().canvas;
-      const next: CanvasMeta = {
-        width: meta.width === undefined ? current.width : clampDimension(meta.width, current.width),
-        height: meta.height === undefined ? current.height : clampDimension(meta.height, current.height),
-        backgroundColor:
-          meta.backgroundColor === undefined
-            ? current.backgroundColor
-            : normalizeColor(meta.backgroundColor, current.backgroundColor),
-      };
-      if (
-        next.width === current.width &&
-        next.height === current.height &&
-        next.backgroundColor === current.backgroundColor
-      ) {
-        return; // nothing changed: no undo step
+    setCanvasMeta: (meta, options) => {
+      const state = get();
+      const current = selectCurrentPage(state).canvas;
+      // Resolve against the ACTIVE page; the same resolved values then go to
+      // the other pages when `allPages` is set.
+      const resolved: Partial<CanvasMeta> = {};
+      if (meta.width !== undefined) resolved.width = clampDimension(meta.width, current.width);
+      if (meta.height !== undefined) resolved.height = clampDimension(meta.height, current.height);
+      if (meta.backgroundColor !== undefined) {
+        resolved.backgroundColor = normalizeColor(meta.backgroundColor, current.backgroundColor);
       }
+
+      const apply = (canvas: CanvasMeta): CanvasMeta => ({ ...canvas, ...resolved });
+      const differs = (canvas: CanvasMeta): boolean => {
+        const next = apply(canvas);
+        return (
+          next.width !== canvas.width ||
+          next.height !== canvas.height ||
+          next.backgroundColor !== canvas.backgroundColor
+        );
+      };
+
+      const targets = options?.allPages
+        ? state.pages.map((_, i) => i)
+        : [state.currentPageIndex];
+      if (!targets.some((i) => differs(state.pages[i].canvas))) return; // nothing changed: no undo step
+
       recordHistoryDebounced("canvas");
-      set({ canvas: next });
+      set((s) => ({
+        pages: s.pages.map((page, i) => (targets.includes(i) ? { ...page, canvas: apply(page.canvas) } : page)),
+      }));
     },
 
     // Selection is deliberately NOT recorded in history — undo should
     // restore what the design looks like, not which handle was active.
-    setSelectedId: (id) => set({ selectedId: id }),
+    setSelectedId: (id) =>
+      set((state) => ({
+        selectedId: id,
+        // Selecting something else (or nothing) ends cropping.
+        croppingId: state.croppingId === id ? state.croppingId : null,
+      })),
 
     addTextElement: (preset = "paragraph") => {
       recordHistoryNow();
-      const { elements, canvas } = get();
+      const { canvas, elements } = selectCurrentPage(get());
       const p = TEXT_PRESETS[preset];
       const el: TextElement = {
         id: newId(),
@@ -362,12 +571,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
         fontStyle: "normal",
         lineHeight: NEW_TEXT_LINE_HEIGHT,
       };
-      set((state) => ({ elements: [...state.elements, el], selectedId: el.id }));
+      set((state) => ({ ...withElements(state, (list) => [...list, el]), selectedId: el.id }));
     },
 
     addShapeElement: (shapeType) => {
       recordHistoryNow();
-      const { elements, canvas } = get();
+      const { canvas, elements } = selectCurrentPage(get());
       const size = shapeType === "circle" ? 160 : 200;
       const el: ShapeElement = {
         id: newId(),
@@ -385,20 +594,24 @@ export const useEditorStore = create<EditorState>((set, get) => {
         strokeWidth: 2,
         cornerRadius: shapeType === "rect" ? 4 : 0,
       };
-      set((state) => ({ elements: [...state.elements, el], selectedId: el.id }));
+      set((state) => ({ ...withElements(state, (list) => [...list, el]), selectedId: el.id }));
     },
 
-    addImageElement: ({ src, naturalWidth, naturalHeight, vector }) => {
+    addImageElement: ({ src, naturalWidth, naturalHeight, vector }, options) => {
       recordHistoryNow();
       trackObjectUrl(src); // from now on this store is responsible for revoking it
-      const { elements, canvas } = get();
+      const { canvas, elements } = selectCurrentPage(get());
       const size = fitImageToCanvas(naturalWidth, naturalHeight, canvas);
+      // top-left corner, like every other element: centred on the canvas, or
+      // on the point the picture was dropped at
+      const corner = options?.at
+        ? topLeftForCentre(size, options.at)
+        : { x: (canvas.width - size.width) / 2, y: (canvas.height - size.height) / 2 };
       const el: ImageElement = {
         id: newId(),
         type: "image",
-        // top-left corner, like every other element; centred on the canvas
-        x: (canvas.width - size.width) / 2,
-        y: (canvas.height - size.height) / 2,
+        x: corner.x,
+        y: corner.y,
         width: size.width,
         height: size.height,
         rotation: 0,
@@ -412,35 +625,78 @@ export const useEditorStore = create<EditorState>((set, get) => {
         scaleY: 1,
         ...(vector ? { vector: true } : {}),
       };
-      set((state) => ({ elements: [...state.elements, el], selectedId: el.id }));
+      // A new picture takes over the selection: any text edit or crop in
+      // progress on another element ends.
+      set((state) => ({
+        ...withElements(state, (list) => [...list, el]),
+        selectedId: el.id,
+        editingId: null,
+        croppingId: null,
+      }));
+    },
+
+    setImageCrop: (id, patch) => {
+      const target = findOnCurrentPage(id);
+      if (!target || target.type !== "image") return;
+      const safe = sanitizeCropPatch(patch);
+      if (!safe || !cropPatchChanges(target, safe)) return;
+      // A gesture is ONE step, however many pointer moves it had: the overlay
+      // only calls this when the pointer is released.
+      recordHistoryNow();
+      set((state) =>
+        withElements(state, (list) =>
+          list.map((e) => (e.id === id && e.type === "image" ? { ...e, ...safe } : e))
+        )
+      );
+    },
+
+    resetImageCrop: (id) => {
+      const target = findOnCurrentPage(id);
+      if (!target || target.type !== "image") return;
+      get().setImageCrop(id, resetCrop(target));
+    },
+
+    setImageStyle: (id, patch) => {
+      const target = findOnCurrentPage(id);
+      if (!target || target.type !== "image") return;
+      // Nothing would change (or nothing is usable): no undo step either.
+      if (applyImageStylePatch(target, patch) === target) return;
+      recordHistoryDebounced(id);
+      set((state) =>
+        withElements(state, (list) =>
+          list.map((e) => (e.id === id && e.type === "image" ? applyImageStylePatch(e, patch) : e))
+        )
+      );
     },
 
     replaceImageSource: (id, { src, naturalWidth, naturalHeight, vector }) => {
-      const target = get().elements.find((e) => e.id === id);
+      const target = findOnCurrentPage(id);
       if (!target || target.type !== "image") return;
       recordHistoryNow();
       trackObjectUrl(src);
       // Same position and width; the height follows the new picture's aspect
       // ratio so it is not stretched. The old crop belonged to the old picture.
       const aspect = naturalWidth > 0 && naturalHeight > 0 ? naturalHeight / naturalWidth : target.height / target.width;
-      set((state) => ({
-        elements: state.elements.map((e) => {
-          if (e.id !== id || e.type !== "image") return e;
-          // Position, width and mirroring are the user's; whether the new file
-          // is a vector picture is the new file's.
-          const { vector: _previous, ...rest } = e;
-          return {
-            ...rest,
-            src,
-            height: Math.round(e.width * aspect * 100) / 100,
-            cropX: 0,
-            cropY: 0,
-            cropWidth: 1,
-            cropHeight: 1,
-            ...(vector ? { vector: true } : {}),
-          };
-        }),
-      }));
+      set((state) =>
+        withElements(state, (list) =>
+          list.map((e) => {
+            if (e.id !== id || e.type !== "image") return e;
+            // Position, width and mirroring are the user's; whether the new file
+            // is a vector picture is the new file's.
+            const { vector: _previous, ...rest } = e;
+            return {
+              ...rest,
+              src,
+              height: Math.round(e.width * aspect * 100) / 100,
+              cropX: 0,
+              cropY: 0,
+              cropWidth: 1,
+              cropHeight: 1,
+              ...(vector ? { vector: true } : {}),
+            };
+          })
+        )
+      );
       // The old picture is still in the history snapshot just recorded, so
       // Undo works; its URL is revoked once that snapshot is gone.
       releaseOrphanUrls();
@@ -452,11 +708,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
     // debounced recorder rather than creating one history entry per call.
     updateElement: (id, attrs) => {
       recordHistoryDebounced(id);
-      set((state) => ({
-        elements: state.elements.map((el) =>
-          el.id === id ? ({ ...el, ...attrs } as CanvasElement) : el
-        ),
-      }));
+      set((state) =>
+        withElements(state, (list) =>
+          list.map((el) => (el.id === id ? ({ ...el, ...attrs } as CanvasElement) : el))
+        )
+      );
     },
 
     // Text height is derived from the text, width and font (Konva measures
@@ -464,19 +720,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
     // not show up as an undo step. Returning `state` unchanged is a no-op.
     syncMeasuredHeight: (id, height) =>
       set((state) => {
-        const el = state.elements.find((e) => e.id === id);
+        const el = selectCurrentPage(state).elements.find((e) => e.id === id);
         if (!el || Math.abs(el.height - height) < 0.5) return state;
-        return {
-          elements: state.elements.map((e) => (e.id === id ? { ...e, height } : e)),
-        };
+        return withElements(state, (list) => list.map((e) => (e.id === id ? { ...e, height } : e)));
       }),
 
     removeElement: (id) => {
       recordHistoryNow();
       set((state) => ({
-        elements: state.elements.filter((el) => el.id !== id),
+        ...withElements(state, (list) => list.filter((el) => el.id !== id)),
         selectedId: state.selectedId === id ? null : state.selectedId,
         editingId: state.editingId === id ? null : state.editingId,
+        croppingId: state.croppingId === id ? null : state.croppingId,
       }));
       // A deleted picture is still in the history snapshot just recorded, so
       // this normally revokes nothing yet — see releaseOrphanUrls().
@@ -492,8 +747,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     // Copy / paste (Ctrl+C / Ctrl+V)
     // -------------------------------------------------------------------
     copySelected: () => {
-      const { selectedId, elements } = get();
-      const el = elements.find((e) => e.id === selectedId);
+      const { selectedId } = get();
+      const el = selectedId === null ? undefined : findOnCurrentPage(selectedId);
       if (!el) return false;
       set({ clipboard: { ...el } });
       releaseOrphanUrls(); // the previous clipboard content no longer holds its picture
@@ -501,7 +756,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     pasteClipboard: () => {
-      const { clipboard, elements } = get();
+      const { clipboard } = get();
       if (!clipboard) return false;
 
       recordHistoryNow();
@@ -510,11 +765,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
         id: newId(),
         x: clipboard.x + PASTE_OFFSET,
         y: clipboard.y + PASTE_OFFSET,
-        zIndex: nextZIndex(elements),
+        zIndex: nextZIndex(selectCurrentPage(get()).elements),
       } as CanvasElement;
 
       set((state) => ({
-        elements: [...state.elements, copy],
+        ...withElements(state, (list) => [...list, copy]),
         selectedId: copy.id,
         // The clipboard now remembers the pasted position, so pressing
         // Ctrl+V repeatedly cascades (+20, +40, +60 ...) instead of
@@ -529,55 +784,49 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     reorderElement: (id, direction) => {
       recordHistoryNow();
-      set((state) => {
-        const sorted = [...state.elements].sort((a, b) => a.zIndex - b.zIndex);
-        const idx = sorted.findIndex((e) => e.id === id);
-        if (idx === -1) return state;
+      set((state) =>
+        withElements(state, (elements) => {
+          const sorted = [...elements].sort((a, b) => a.zIndex - b.zIndex);
+          const idx = sorted.findIndex((e) => e.id === id);
+          if (idx === -1) return elements;
 
-        if (direction === "front") {
-          const maxZ = Math.max(...sorted.map((e) => e.zIndex));
-          return {
-            elements: state.elements.map((e) => (e.id === id ? { ...e, zIndex: maxZ + 1 } : e)),
-          };
-        }
-        if (direction === "back") {
-          const minZ = Math.min(...sorted.map((e) => e.zIndex));
-          return {
-            elements: state.elements.map((e) => (e.id === id ? { ...e, zIndex: minZ - 1 } : e)),
-          };
-        }
-        if (direction === "forward" && idx < sorted.length - 1) {
-          const other = sorted[idx + 1];
-          const cur = sorted[idx];
-          return {
-            elements: state.elements.map((e) => {
+          if (direction === "front") {
+            const maxZ = Math.max(...sorted.map((e) => e.zIndex));
+            return elements.map((e) => (e.id === id ? { ...e, zIndex: maxZ + 1 } : e));
+          }
+          if (direction === "back") {
+            const minZ = Math.min(...sorted.map((e) => e.zIndex));
+            return elements.map((e) => (e.id === id ? { ...e, zIndex: minZ - 1 } : e));
+          }
+          if (direction === "forward" && idx < sorted.length - 1) {
+            const other = sorted[idx + 1];
+            const cur = sorted[idx];
+            return elements.map((e) => {
               if (e.id === cur.id) return { ...e, zIndex: other.zIndex };
               if (e.id === other.id) return { ...e, zIndex: cur.zIndex };
               return e;
-            }),
-          };
-        }
-        if (direction === "backward" && idx > 0) {
-          const other = sorted[idx - 1];
-          const cur = sorted[idx];
-          return {
-            elements: state.elements.map((e) => {
+            });
+          }
+          if (direction === "backward" && idx > 0) {
+            const other = sorted[idx - 1];
+            const cur = sorted[idx];
+            return elements.map((e) => {
               if (e.id === cur.id) return { ...e, zIndex: other.zIndex };
               if (e.id === other.id) return { ...e, zIndex: cur.zIndex };
               return e;
-            }),
-          };
-        }
-        return state;
-      });
+            });
+          }
+          return elements;
+        })
+      );
     },
 
     // Arrow-key nudging reuses updateElement, so a burst of key-repeats
     // while the key is held down also collapses into one undo step.
     nudgeSelected: (dx, dy) => {
-      const { selectedId, elements } = get();
+      const { selectedId } = get();
       if (!selectedId) return;
-      const el = elements.find((e) => e.id === selectedId);
+      const el = findOnCurrentPage(selectedId);
       if (!el) return;
       get().updateElement(selectedId, { x: el.x + dx, y: el.y + dy });
     },
@@ -588,8 +837,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     exportToJSON: async (format = "kusuka") => {
       // Snapshot the document first; the user may keep editing while the
       // pictures are being read, and the file must reflect ONE moment.
-      const { canvas, elements } = get();
-      const doc: CanvasDocument = { version: SCHEMA_VERSION, canvas, elements };
+      const { pages } = get();
+      const doc: CanvasDocument = { version: SCHEMA_VERSION, pages };
 
       // blob: URLs die with the page, so uploaded pictures are embedded as
       // data: URLs in the exported copy (the live elements are untouched).
@@ -598,10 +847,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return { json: JSON.stringify(out, null, 2), warnings };
     },
 
-    // The one entry point for replacing the canvas: the Import button and
+    // The one entry point for replacing the document: the Import button and
     // the template gallery both call this. Input may be a JSON string or an
     // already-parsed object, in native OR Polotno format — parseDocument()
-    // detects which and maps it to the native schema deterministically.
+    // detects which and maps every page to the native schema deterministically.
     loadFromJSON: (jsonData) => {
       const parsed = parseDocument(jsonData);
       if (!parsed.ok) return parsed;
@@ -611,19 +860,29 @@ export const useEditorStore = create<EditorState>((set, get) => {
       // one Ctrl+Z away.
       recordHistoryNow();
       set({
-        canvas: parsed.document.canvas,
-        elements: parsed.document.elements,
-        selectedId: null,
-        editingId: null,
+        pages: parsed.document.pages,
+        currentPageIndex: 0,
+        ...NO_SELECTION,
         loadRevision: get().loadRevision + 1,
       });
+      markViewAfterLastStep(0); // Redo opens the imported document on its first page
       releaseOrphanUrls();
-      return { ok: true, format: parsed.format, warnings: parsed.warnings };
+      return {
+        ok: true,
+        format: parsed.format,
+        warnings: parsed.warnings,
+        pageCount: parsed.document.pages.length,
+      };
     },
 
     reset: () => {
       recordHistoryNow();
-      set({ canvas: { ...DEFAULT_CANVAS }, elements: [], selectedId: null, editingId: null });
+      set({
+        pages: [createBlankPage(DEFAULT_CANVAS)],
+        currentPageIndex: 0,
+        ...NO_SELECTION,
+      });
+      markViewAfterLastStep(0);
       releaseOrphanUrls();
     },
   };

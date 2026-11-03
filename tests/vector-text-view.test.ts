@@ -2,6 +2,7 @@
 // and the view scale (zoom) — everything that needs no browser.
 import assert from "node:assert/strict";
 import { test, run } from "./harness";
+import { E, C, onePage, mkPage } from "./helpers";
 import {
   OWN_EXPORT_SOURCE,
   TEXT_WIDTH_TOLERANCE,
@@ -108,7 +109,7 @@ test("text: the adapter puts the CLEAN string into the element and reports lost 
     { id: "b", type: "text", x: 0, y: 0, width: 300, text: "<p><strong>Tebal</strong> biasa</p>", fill: "#000" },
     { id: "c", type: "text", x: 0, y: 0, width: 300, text: "<p><em>Miring</em></p>", fill: "#000" },
   ]);
-  assert.deepEqual(d.elements.map((e) => (e as TextElement).text), ["Halo\nDunia", "Tebal biasa", "Miring"]);
+  assert.deepEqual(d.pages[0].elements.map((e) => (e as TextElement).text), ["Halo\nDunia", "Tebal biasa", "Miring"]);
   const styled = warnings.filter((w) => w.includes("berformat per bagian"));
   assert.equal(styled.length, 1);
   assert.match(styled[0], /^2 teks/);
@@ -124,7 +125,7 @@ test("text: structural-only HTML produces no warning; native files are never cle
     elements: [{ id: "n", type: "text", x: 0, y: 0, width: 50, height: 20, text: "<p>ketik apa adanya</p>", fontSize: 12 }],
   });
   assert.ok(!("error" in native));
-  if (!("error" in native)) assert.equal((native.document.elements[0] as TextElement).text, "<p>ketik apa adanya</p>");
+  if (!("error" in native)) assert.equal((native.document.pages[0].elements[0] as TextElement).text, "<p>ketik apa adanya</p>");
 });
 
 // =================================================================== svg
@@ -134,14 +135,14 @@ test("svg: a vector element is imported as an image (src kept), flagged vector, 
     { id: "arrow", type: "svg", x: 5, y: 6, width: 40, height: 40, src: SVG_DATA_URI },
   ]);
   assert.deepEqual(warnings, []);
-  assert.equal(d.elements.length, 2);
-  const bolt = d.elements[0] as ImageElement;
+  assert.equal(d.pages[0].elements.length, 2);
+  const bolt = d.pages[0].elements[0] as ImageElement;
   assert.equal(bolt.type, "image");
   assert.equal(bolt.vector, true);
   assert.equal(bolt.src, "https://cdn.example.com/icons/bolt.svg");
   assert.deepEqual([bolt.x, bolt.y, bolt.width, bolt.height, bolt.rotation], [100, 200, 64, 96, 15]);
   assert.deepEqual([bolt.cropX, bolt.cropY, bolt.cropWidth, bolt.cropHeight, bolt.scaleX, bolt.scaleY], [0, 0, 1, 1, 1, 1]);
-  assert.equal((d.elements[1] as ImageElement).src, SVG_DATA_URI, "a data URI is passed through untouched");
+  assert.equal((d.pages[0].elements[1] as ImageElement).src, SVG_DATA_URI, "a data URI is passed through untouched");
 });
 
 test("svg: written back as `svg`; an ordinary image stays `image`", () => {
@@ -161,9 +162,9 @@ test("svg: without a source it is skipped and reported; crop and mask are handle
     { id: "x", type: "svg", x: 0, y: 0, width: 10, height: 10 },
     { id: "y", type: "svg", x: 0, y: 0, width: 10, height: 10, src: SVG_DATA_URI, cropX: 0.1, cropY: 0.1, cropWidth: 0.5, cropHeight: 0.5, maskSrc: "https://e.com/m.svg" },
   ]);
-  assert.deepEqual(d.elements.map((e) => e.id), ["y"]);
+  assert.deepEqual(d.pages[0].elements.map((e) => e.id), ["y"]);
   assert.ok(warnings.some((w) => /SVG tanpa sumber/.test(w)));
-  const y = d.elements[0] as ImageElement;
+  const y = d.pages[0].elements[0] as ImageElement;
   assert.deepEqual([y.cropX, y.cropY, y.cropWidth, y.cropHeight], [0.1, 0.1, 0.5, 0.5]);
   assert.ok(warnings.some((w) => /efek yang belum didukung/.test(w)), "a mask is not supported: reported");
 });
@@ -172,7 +173,7 @@ test("svg: colorsReplace is applied to a data-URI SVG, only reported for a link"
   const recolour = first([
     { id: "v", type: "svg", x: 0, y: 0, width: 10, height: 10, src: SVG_DATA_URI, colorsReplace: { "#000000": "#ff0000" } },
   ]);
-  const src = (recolour.document.elements[0] as ImageElement).src;
+  const src = (recolour.document.pages[0].elements[0] as ImageElement).src;
   assert.notEqual(src, SVG_DATA_URI);
   const svg = decodeURIComponent(src.slice(src.indexOf(",") + 1));
   assert.match(svg, /fill="#ff0000"/);
@@ -182,13 +183,13 @@ test("svg: colorsReplace is applied to a data-URI SVG, only reported for a link"
   const link = first([
     { id: "v", type: "svg", x: 0, y: 0, width: 10, height: 10, src: "https://e.com/i.svg", colorsReplace: { "#000": "#f00" } },
   ]);
-  assert.equal((link.document.elements[0] as ImageElement).src, "https://e.com/i.svg");
+  assert.equal((link.document.pages[0].elements[0] as ImageElement).src, "https://e.com/i.svg");
   assert.ok(link.warnings.some((w) => /colorsReplace/.test(w)));
 
   // base64 data URI
   const b64 = "data:image/svg+xml;base64," + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><rect fill="#fff"/></svg>').toString("base64");
   const r = first([{ id: "v", type: "svg", x: 0, y: 0, width: 10, height: 10, src: b64, colorsReplace: { "#ffffff": "#00ff00", "#fff": "#0000ff" } }]);
-  const out = (r.document.elements[0] as ImageElement).src;
+  const out = (r.document.pages[0].elements[0] as ImageElement).src;
   assert.match(decodeURIComponent(out), /fill="#0000ff"/, "'#fff' is matched on its own, not as the start of '#ffffff'");
 });
 
@@ -215,9 +216,9 @@ test("mirror: flipX / flipY become scaleX / scaleY = -1, and the box does not mo
     { id: "c", type: "svg", x: 120, y: 80, width: 200, height: 100, rotation: 30, src: SVG_DATA_URI, flipX: true, flipY: true },
     { id: "d", type: "image", x: 120, y: 80, width: 200, height: 100, rotation: 30, src: "https://e/a.png" },
   ]);
-  const flips = d.elements.map((e) => [(e as ImageElement).scaleX, (e as ImageElement).scaleY]);
+  const flips = d.pages[0].elements.map((e) => [(e as ImageElement).scaleX, (e as ImageElement).scaleY]);
   assert.deepEqual(flips, [[-1, 1], [1, -1], [-1, -1], [1, 1]]);
-  for (const e of d.elements) assert.deepEqual([e.x, e.y, e.width, e.height, e.rotation], [120, 80, 200, 100, 30]);
+  for (const e of d.pages[0].elements) assert.deepEqual([e.x, e.y, e.width, e.height, e.rotation], [120, 80, 200, 100, 30]);
 });
 
 test("mirror: negative scaleX / scaleY — (x, y) moves to the top-left of what is visible (property test, with rotation)", () => {
@@ -227,7 +228,7 @@ test("mirror: negative scaleX / scaleY — (x, y) moves to the top-left of what 
   for (const rot of rotations) {
     for (const [sx, sy] of scales) {
       const src = { id: "m", type: "image", x: 500, y: 300, width: 120, height: 80, rotation: rot, scaleX: sx, scaleY: sy, src: "https://e/a.png" };
-      const el = first([src]).document.elements[0] as ImageElement;
+      const el = first([src]).document.pages[0].elements[0] as ImageElement;
       assert.deepEqual(
         corners(el.x, el.y, el.width, el.height, el.rotation, 1, 1),
         corners(src.x, src.y, src.width, src.height, src.rotation, sx, sy),
@@ -242,15 +243,15 @@ test("mirror: negative scaleX / scaleY — (x, y) moves to the top-left of what 
   }
   assert.equal(checked, 36);
   // the plain case, by hand
-  const one = first([{ id: "m", type: "image", x: 500, y: 300, width: 100, height: 50, scaleX: -1, src: "https://e/a.png" }]).document.elements[0];
+  const one = first([{ id: "m", type: "image", x: 500, y: 300, width: 100, height: 50, scaleX: -1, src: "https://e/a.png" }]).document.pages[0].elements[0];
   assert.deepEqual([one.x, one.y, one.width], [400, 300, 100]);
 });
 
 test("mirror: the flip flag and a negative scale on the same axis cancel; a zero scale is ignored", () => {
-  const cancel = first([{ id: "m", type: "image", x: 500, y: 300, width: 100, height: 50, scaleX: -1, flipX: true, src: "https://e/a.png" }]).document.elements[0] as ImageElement;
+  const cancel = first([{ id: "m", type: "image", x: 500, y: 300, width: 100, height: 50, scaleX: -1, flipX: true, src: "https://e/a.png" }]).document.pages[0].elements[0] as ImageElement;
   assert.equal(cancel.scaleX, 1);
   assert.equal(cancel.x, 400, "...but the origin shift of the negative scale still applies");
-  const zero = first([{ id: "m", type: "image", x: 5, y: 6, width: 100, height: 50, scaleX: 0, scaleY: 0, src: "https://e/a.png" }]).document.elements[0] as ImageElement;
+  const zero = first([{ id: "m", type: "image", x: 5, y: 6, width: 100, height: 50, scaleX: 0, scaleY: 0, src: "https://e/a.png" }]).document.pages[0].elements[0] as ImageElement;
   assert.deepEqual([zero.x, zero.y, zero.width, zero.height, zero.scaleX, zero.scaleY], [5, 6, 100, 50, 1, 1]);
 });
 
@@ -262,18 +263,14 @@ test("mirror: text can't be mirrored (warned); a mirrored rectangle looks the sa
   ]);
   assert.equal(warnings.filter((w) => /skala atau pencerminan/.test(w)).length, 1);
   assert.match(warnings.find((w) => /skala atau pencerminan/.test(w))!, /^2 teks/);
-  assert.deepEqual([d.elements[2].x, d.elements[2].y, d.elements[2].width, d.elements[2].height], [10, 10, 200, 40]);
+  assert.deepEqual([d.pages[0].elements[2].x, d.pages[0].elements[2].y, d.pages[0].elements[2].width, d.pages[0].elements[2].height], [10, 10, 200, 40]);
 });
 
 test("mirror: survives native -> Polotno -> native, and a native file; garbage scale values are not trusted", () => {
-  const doc: CanvasDocument = {
-    version: 2,
-    canvas: { width: 400, height: 300, backgroundColor: "#ffffff" },
-    elements: [
-      { id: "a", type: "image", x: 10, y: 20, width: 100, height: 50, rotation: 7, zIndex: 1, src: "https://e/a.png", cropX: 0, cropY: 0, cropWidth: 1, cropHeight: 1, scaleX: -1, scaleY: 1 },
-      { id: "b", type: "image", x: 10, y: 20, width: 100, height: 50, rotation: 0, zIndex: 2, src: SVG_DATA_URI, cropX: 0, cropY: 0, cropWidth: 1, cropHeight: 1, scaleX: 1, scaleY: -1, vector: true },
-    ],
-  };
+  const doc: CanvasDocument = onePage({ width: 400, height: 300, backgroundColor: "#ffffff" }, [
+    { id: "a", type: "image", x: 10, y: 20, width: 100, height: 50, rotation: 7, zIndex: 1, src: "https://e/a.png", cropX: 0, cropY: 0, cropWidth: 1, cropHeight: 1, scaleX: -1, scaleY: 1 },
+    { id: "b", type: "image", x: 10, y: 20, width: 100, height: 50, rotation: 0, zIndex: 2, src: SVG_DATA_URI, cropX: 0, cropY: 0, cropWidth: 1, cropHeight: 1, scaleX: 1, scaleY: -1, vector: true },
+  ]);
   const out = convertKusukaToPolotno(doc).pages[0].children!;
   assert.deepEqual([out[0].flipX, out[0].flipY, out[1].flipX, out[1].flipY], [true, false, false, true]);
   assert.deepEqual(convertPolotnoToKusuka(convertKusukaToPolotno(doc)).document, doc);
@@ -289,7 +286,7 @@ test("mirror: survives native -> Polotno -> native, and a native file; garbage s
   });
   assert.ok(!("error" in bad));
   if (!("error" in bad)) {
-    const el = bad.document.elements[0] as ImageElement;
+    const el = bad.document.pages[0].elements[0] as ImageElement;
     assert.deepEqual([el.scaleX, el.scaleY, el.vector], [1, 1, undefined]);
   }
 });
@@ -297,7 +294,7 @@ test("mirror: survives native -> Polotno -> native, and a native file; garbage s
 // ========================================================== text tolerance
 test("tolerance: +10px of width, x moved back by the part that matches the alignment", () => {
   const mk = (align: string, rotation = 0) =>
-    first([{ id: "t", type: "text", x: 100, y: 50, width: 200, rotation, text: "SALE", fill: "#000", align }]).document.elements[0] as TextElement;
+    first([{ id: "t", type: "text", x: 100, y: 50, width: 200, rotation, text: "SALE", fill: "#000", align }]).document.pages[0].elements[0] as TextElement;
   const left = mk("left");
   const center = mk("center");
   const right = mk("right");
@@ -327,20 +324,18 @@ test("tolerance: exporting to Polotno takes it back out — the file round-trips
 });
 
 test("tolerance: a width measured in this editor (no tolerance) is marked and never padded again", () => {
-  const exact: CanvasDocument = {
-    version: 2,
-    canvas: { width: 300, height: 200, backgroundColor: "#ffffff" },
-    elements: [{ id: "t", type: "text", x: 10, y: 10, width: 180, height: 30, rotation: 0, zIndex: 1, text: "Hai", fontSize: 20, fontFamily: "Inter, sans-serif", fill: "#000000", align: "left", fontStyle: "normal", lineHeight: 1.2 }],
-  };
+  const exact: CanvasDocument = onePage({ width: 300, height: 200, backgroundColor: "#ffffff" }, [
+    { id: "t", type: "text", x: 10, y: 10, width: 180, height: 30, rotation: 0, zIndex: 1, text: "Hai", fontSize: 20, fontFamily: "Inter, sans-serif", fill: "#000000", align: "left", fontStyle: "normal", lineHeight: 1.2 },
+  ]);
   const polo = convertKusukaToPolotno(exact);
   assert.equal((polo.pages[0].children![0].custom as { source: string }).source, OWN_EXPORT_SOURCE);
   const again = convertPolotnoToKusuka(polo).document;
   assert.deepEqual(again, exact);
-  assert.equal((again.elements[0] as TextElement).width, 180);
+  assert.equal((again.pages[0].elements[0] as TextElement).width, 180);
 });
 
 test("tolerance: an empty-width box gets none; a native file's value is kept but bounded", () => {
-  const zero = first([{ id: "t", type: "text", x: 0, y: 0, width: 0, text: "x", fill: "#000" }]).document.elements[0] as TextElement;
+  const zero = first([{ id: "t", type: "text", x: 0, y: 0, width: 0, text: "x", fill: "#000" }]).document.pages[0].elements[0] as TextElement;
   assert.equal(zero.widthTolerance, undefined);
   const native = sanitizeKusukaDocument({
     version: 2,
@@ -348,7 +343,7 @@ test("tolerance: an empty-width box gets none; a native file's value is kept but
     elements: [{ id: "t", type: "text", x: 0, y: 0, width: 50, text: "x", widthTolerance: 99999 }],
   });
   assert.ok(!("error" in native));
-  if (!("error" in native)) assert.equal((native.document.elements[0] as TextElement).widthTolerance, 100);
+  if (!("error" in native)) assert.equal((native.document.pages[0].elements[0] as TextElement).widthTolerance, 100);
 });
 
 // ==================================================================== zoom
@@ -521,7 +516,8 @@ const ops = (calls: Call[]) => calls.map((c) => c.op);
 test("drawPicture: not mirrored — the picture goes straight into the box, no transform", () => {
   const { ctx, calls } = recordingContext();
   drawPicture(ctx, "shape", { width: 200, height: 100, image: IMG, flipX: false, flipY: false });
-  assert.deepEqual(ops(calls), ["beginPath", "rect", "closePath", "fillStrokeShape", "save", "drawImage", "restore"]);
+  // A loaded picture draws no placeholder frame (the frame only shows while loading / on error).
+  assert.deepEqual(ops(calls), ["save", "drawImage", "restore"]);
   assert.deepEqual(calls.find((c) => c.op === "drawImage")!.args, [IMG, 0, 0, 200, 100]);
 });
 

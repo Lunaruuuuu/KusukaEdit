@@ -17,6 +17,17 @@ export interface ExportImageOptions {
   designSize?: { width: number; height: number };
 }
 
+/** A rendered page: the picture as a data URL plus how big it came out. */
+export interface RenderedImage {
+  dataUrl: string;
+  /** The ratio actually used (may be lower than requested, see `capped`). */
+  pixelRatio: number;
+  /** True when the requested ratio was lowered to keep the output within browser limits. */
+  capped: boolean;
+  outputWidth: number;
+  outputHeight: number;
+}
+
 export interface ExportImageResult {
   fileName: string;
   /** The ratio actually used (may be lower than requested, see `capped`). */
@@ -29,11 +40,13 @@ export interface ExportImageResult {
 }
 
 /**
- * Rasterizes the current Konva Stage to a downloadable PNG/JPG using
- * Konva's built-in `stage.toDataURL()`. This is the "flatten the whole
- * document into one image" counterpart to exportToJSON() — JSON keeps the
- * design editable, this produces the final visual the end user actually
- * wants to share or print.
+ * Rasterizes the Konva Stage, as it is drawn right now (the ACTIVE page), to a
+ * PNG/JPG data URL using Konva's built-in `stage.toDataURL()`. Nothing is
+ * downloaded here: exportStageAsImage() saves one picture, and the batch
+ * export (lib/exportPages.ts) calls this once per page and bundles the results.
+ * This is the "flatten the page into one image" counterpart to exportToJSON() —
+ * JSON keeps the design editable, this produces the final visual the end user
+ * actually wants to share or print.
  *
  * The output is the DESIGN (the `canvas` size in the store) times the pixel
  * ratio, whatever zoom the canvas is shown at. On screen the Stage is
@@ -43,8 +56,11 @@ export interface ExportImageResult {
  * Resizing the workspace changes the exported picture with no extra step.
  * Throws an Error with a message meant to be shown to the user.
  */
-export function exportStageAsImage(stage: Konva.Stage, options: ExportImageOptions): ExportImageResult {
-  const { format, pixelRatio = 2, fileName, designSize } = options;
+export function renderStageToDataUrl(
+  stage: Konva.Stage,
+  options: Omit<ExportImageOptions, "fileName">
+): RenderedImage {
+  const { format, pixelRatio = 2, designSize } = options;
 
   // The design size: given by the caller, or what the Stage measures on
   // screen divided by the view scale.
@@ -117,20 +133,38 @@ export function exportStageAsImage(stage: Konva.Stage, options: ExportImageOptio
     );
   }
 
-  const extension = format === "jpeg" ? "jpg" : "png";
-  const name = fileName ?? `canvas-design-${Date.now()}.${extension}`;
-  const link = document.createElement("a");
-  link.href = dataUrl;
-  link.download = name;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-
   return {
-    fileName: name,
+    dataUrl,
     pixelRatio: plan.pixelRatio,
     capped: plan.capped,
     outputWidth: plan.outputWidth,
     outputHeight: plan.outputHeight,
+  };
+}
+
+/** Starts the browser's download of a data URL under `fileName`. */
+export function downloadDataUrl(dataUrl: string, fileName: string): void {
+  const link = document.createElement("a");
+  link.href = dataUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+/** Renders the active page and downloads it as ONE picture. */
+export function exportStageAsImage(stage: Konva.Stage, options: ExportImageOptions): ExportImageResult {
+  const { fileName, ...renderOptions } = options;
+  const rendered = renderStageToDataUrl(stage, renderOptions);
+  const extension = options.format === "jpeg" ? "jpg" : "png";
+  const name = fileName ?? `canvas-design-${Date.now()}.${extension}`;
+  downloadDataUrl(rendered.dataUrl, name);
+
+  return {
+    fileName: name,
+    pixelRatio: rendered.pixelRatio,
+    capped: rendered.capped,
+    outputWidth: rendered.outputWidth,
+    outputHeight: rendered.outputHeight,
   };
 }

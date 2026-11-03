@@ -4,18 +4,20 @@
 //   detectFormat()            "kusuka" | "polotno" | "unknown"
 //   parseDocument()           string/object -> validated CanvasDocument
 //                             (this is what the store's loadFromJSON calls)
-//   convertPolotnoToKusuka()  Polotno { pages: [{ children }] }  ->  CanvasDocument
-//   convertKusukaToPolotno()  CanvasDocument  ->  Polotno document
+//   convertPolotnoToKusuka()  Polotno { pages: [{ children }, ...] }  ->  CanvasDocument
+//                             (EVERY page becomes a page of the document)
+//   convertKusukaToPolotno()  CanvasDocument  ->  Polotno document (every page written)
 //   sanitizeKusukaDocument()  validates a native file, fills defaults,
-//                             migrates old schema versions
+//                             migrates old schema versions (v1/v2 = one page)
 //
 // Pure functions only: no DOM, no React, no store. That keeps the adapter
 // unit-testable in plain Node.
 //
 // Field mapping (Polotno -> KusukaEdit):
-//   doc.width/height or page.width/height   -> canvas.width / height
-//   page.background                         -> canvas.backgroundColor
-//   page.children[]  (array order)          -> elements[]  (zIndex = position + 1)
+//   doc.pages[i]                            -> pages[i]  (same order, same count)
+//   doc.width/height or page.width/height   -> page.canvas.width / height
+//   page.background                         -> page.canvas.backgroundColor
+//   page.children[]  (array order)          -> page.elements[]  (zIndex = position + 1)
 //   text    text (HTML -> plain, see cleanPolotnoText) -> text.text
 //   text    fill (fallback: color)          -> text.fill
 //   text    fontWeight + fontStyle          -> text.fontStyle ("bold italic" ...)
@@ -24,6 +26,15 @@
 //   image   src, cropX/Y/Width/Height       -> image (src + crop as 0..1 fractions)
 //   svg     src (URL or data URI), colorsReplace -> image with vector: true
 //   image/svg  flipX, flipY, scaleX, scaleY -> image.scaleX / scaleY (= ±1)
+//   image/svg  blurEnabled + blurRadius     -> image.blurRadius
+//   image/svg  borderSize + borderColor     -> image.strokeWidth + image.stroke
+//   image/svg  shadowEnabled + shadowColor / shadowBlur / shadowOffsetX|Y /
+//              shadowOpacity                -> image.shadow* (see lib/polotnoEffects.ts)
+//   image/svg  clipSrc (circle / triangle)  -> image.maskShape
+//   image/svg  cornerRadius                 -> image.cornerRadius
+//   image/svg  brightnessEnabled + brightness, sepiaEnabled, grayscaleEnabled,
+//              filters.contrast / .saturation -> image.brightness / filterPreset /
+//              contrast / saturation (see lib/polotnoEffects.ts)
 //
 // Coordinates: every element, in both formats, is positioned by the TOP-LEFT
 // corner of its bounding box and rotated (clockwise, in degrees) around that
@@ -44,11 +55,13 @@
 import {
   DEFAULT_CANVAS,
   DEFAULT_FONT_FAMILY,
+  LAST_SINGLE_PAGE_SCHEMA,
   SCHEMA_VERSION,
   type CanvasDocument,
   type CanvasElement,
   type CanvasMeta,
   type ImageElement,
+  type Page,
   type ShapeElement,
   type TextAlign,
   type TextElement,
@@ -56,6 +69,12 @@ import {
 } from "@/types/editor";
 import { newId } from "@/lib/id";
 import { isColorSpecified, normalizeColor, parseColor } from "@/lib/color";
+import {
+  hasUnknownFilters,
+  imageEffectsToPolotno,
+  readNativeImageEffects,
+  readPolotnoImageEffects,
+} from "@/lib/polotnoEffects";
 import { isObjectUrl } from "@/lib/objectUrls";
 
 // ----------------------------- Polotno types ------------------------------
@@ -108,7 +127,7 @@ export type ParseResult =
   | { ok: false; error: string };
 
 export type LoadResult =
-  | { ok: true; format: ExportFormat; warnings: string[] }
+  | { ok: true; format: ExportFormat; warnings: string[]; pageCount: number }
   | { ok: false; error: string };
 
 // The Polotno schema revision these exports target (see polotno.com/docs/schema/store).
@@ -476,9 +495,32 @@ function composeFontStyle(bold: boolean, italic: boolean): TextFontStyle {
 
 // ------------------------------ Detection ---------------------------------
 
+/** A page of a NATIVE v3 file: `canvas` / `elements`, and no Polotno `children`. */
+function isNativePage(page: unknown): boolean {
+  return (
+    isRecord(page) &&
+    !Array.isArray(page.children) &&
+    (Array.isArray(page.elements) || isRecord(page.canvas))
+  );
+}
+
+/**
+ * Which format a parsed JSON value is in.
+ *   native v1 / v2   `canvas` + `elements` at the top level (one page)
+ *   native v3        `version` + `pages: [{ canvas, elements }]`
+ *   Polotno          `pages: [{ children }]` (usually with `schemaVersion`)
+ * Both v3 and Polotno have a `pages` array, so the pages themselves decide:
+ * a page with `children` (or a document with `schemaVersion`) is Polotno's.
+ */
 export function detectFormat(data: unknown): DocumentFormat {
   if (!isRecord(data)) return "unknown";
-  if (Array.isArray(data.pages)) return "polotno";
+  if (Array.isArray(data.pages)) {
+    const pages = data.pages as unknown[];
+    const polotnoPage = pages.some((page) => isRecord(page) && Array.isArray(page.children));
+    if (typeof data.schemaVersion === "number" || polotnoPage) return "polotno";
+    if (pages.some(isNativePage) || (typeof data.version === "number" && pages.length === 0)) return "kusuka";
+    return "polotno"; // e.g. { pages: [{}] }: the shape Polotno documents have
+  }
   if (isRecord(data.canvas) && Array.isArray(data.elements)) return "kusuka";
   return "unknown";
 }
@@ -528,34 +570,42 @@ function migrateV1Circle(base: BaseFields): BaseFields {
   };
 }
 
-export function sanitizeKusukaDocument(
-  raw: Record<string, unknown>
-): ConversionResult | { error: string } {
-  const version = num(raw.version, 1);
-  if (version > SCHEMA_VERSION) {
-    return {
-      error: `File memakai skema v${version}, sedangkan editor ini hanya mendukung sampai v${SCHEMA_VERSION}.`,
-    };
-  }
+/** Counters for what a native file needed fixing (turned into warnings once, for the whole document). */
+interface NativeTally {
+  skipped: number;
+  migratedCircles: number;
+  deadBlobImages: number;
+  badCrops: number;
+  skippedPages: number;
+}
 
-  const warnings: string[] = [];
-  const canvasRaw = isRecord(raw.canvas) ? raw.canvas : {};
+/** v1 stored circles by their centre; from v2 on every element is stored by its top-left corner. */
+const CENTRE_CIRCLE_LAST_SCHEMA = 1;
+
+function sanitizeNativePage(
+  rawCanvas: unknown,
+  rawElements: unknown,
+  pageId: unknown,
+  version: number,
+  usedIds: Set<string>,
+  usedPageIds: Set<string>,
+  t: NativeTally
+): Page {
+  const canvasRaw = isRecord(rawCanvas) ? rawCanvas : {};
   const canvas: CanvasMeta = {
     width: Math.max(1, num(canvasRaw.width, DEFAULT_CANVAS.width)),
     height: Math.max(1, num(canvasRaw.height, DEFAULT_CANVAS.height)),
     backgroundColor: normalizeColor(canvasRaw.backgroundColor, DEFAULT_CANVAS.backgroundColor),
   };
 
-  const usedIds = new Set<string>();
-  const elements: CanvasElement[] = [];
-  let skipped = 0;
-  let migratedCircles = 0;
-  let deadBlobImages = 0;
-  let badCrops = 0;
+  let id = typeof pageId === "string" ? pageId : "";
+  if (id === "" || usedPageIds.has(id)) id = newId();
+  usedPageIds.add(id);
 
-  (Array.isArray(raw.elements) ? raw.elements : []).forEach((item, index) => {
+  const elements: CanvasElement[] = [];
+  (Array.isArray(rawElements) ? rawElements : []).forEach((item, index) => {
     if (!isRecord(item)) {
-      skipped++;
+      t.skipped++;
       return;
     }
 
@@ -583,9 +633,9 @@ export function sanitizeKusukaDocument(
 
     if (item.type === "shape" && (item.shapeType === "rect" || item.shapeType === "circle")) {
       let base = readBase(item, index, usedIds);
-      if (item.shapeType === "circle" && version < SCHEMA_VERSION) {
+      if (item.shapeType === "circle" && version < CENTRE_CIRCLE_LAST_SCHEMA + 1) {
         base = migrateV1Circle(base);
-        migratedCircles++;
+        t.migratedCircles++;
       }
       const el: ShapeElement = {
         ...base,
@@ -603,8 +653,8 @@ export function sanitizeKusukaDocument(
 
     if (item.type === "image" && typeof item.src === "string" && item.src !== "") {
       // Files written before images could be drawn have no crop: whole picture.
-      const crop = readCrop(item) ?? (badCrops++, FULL_CROP);
-      if (isObjectUrl(item.src)) deadBlobImages++;
+      const crop = readCrop(item) ?? (t.badCrops++, FULL_CROP);
+      if (isObjectUrl(item.src)) t.deadBlobImages++;
       const el: ImageElement = {
         ...readBase(item, index, usedIds),
         type: "image",
@@ -614,86 +664,166 @@ export function sanitizeKusukaDocument(
         scaleX: item.scaleX === -1 ? -1 : 1,
         scaleY: item.scaleY === -1 ? -1 : 1,
         ...(item.vector === true ? { vector: true } : {}),
+        // Optional effects: only the valid ones are kept.
+        ...readNativeImageEffects(item),
       };
       elements.push(el);
       return;
     }
 
-    skipped++;
+    t.skipped++;
   });
 
-  if (skipped > 0) {
-    warnings.push(`${pluralize(skipped, "elemen")} tidak valid atau bertipe tidak dikenal dan dilewati.`);
+  return { id, canvas, elements };
+}
+
+export function sanitizeKusukaDocument(
+  raw: Record<string, unknown>
+): ConversionResult | { error: string } {
+  const version = num(raw.version, 1);
+  if (version > SCHEMA_VERSION) {
+    return {
+      error: `File memakai skema v${version}, sedangkan editor ini hanya mendukung sampai v${SCHEMA_VERSION}.`,
+    };
   }
-  if (deadBlobImages > 0) {
-    warnings.push(blobWarning(deadBlobImages));
+
+  const warnings: string[] = [];
+  const t: NativeTally = { skipped: 0, migratedCircles: 0, deadBlobImages: 0, badCrops: 0, skippedPages: 0 };
+  // Element ids and page ids are unique across the WHOLE document.
+  const usedIds = new Set<string>();
+  const usedPageIds = new Set<string>();
+  const pages: Page[] = [];
+
+  if (version <= LAST_SINGLE_PAGE_SCHEMA || !Array.isArray(raw.pages)) {
+    // v1 / v2 (or a file without `pages`): the whole document is ONE page.
+    pages.push(sanitizeNativePage(raw.canvas, raw.elements, undefined, version, usedIds, usedPageIds, t));
+  } else {
+    for (const item of raw.pages) {
+      if (!isRecord(item)) {
+        t.skippedPages++;
+        continue;
+      }
+      pages.push(sanitizeNativePage(item.canvas, item.elements, item.id, version, usedIds, usedPageIds, t));
+    }
+    if (pages.length === 0) {
+      pages.push(sanitizeNativePage(undefined, undefined, undefined, version, usedIds, usedPageIds, t));
+      warnings.push("File tidak berisi halaman yang valid; dibuat satu halaman kosong.");
+    }
   }
-  if (badCrops > 0) {
-    warnings.push(`${pluralize(badCrops, "gambar")} punya nilai crop yang tidak valid; seluruh gambar ditampilkan.`);
+
+  if (t.skippedPages > 0) {
+    warnings.push(`${pluralize(t.skippedPages, "halaman")} tidak valid dan dilewati.`);
   }
-  if (migratedCircles > 0) {
+  if (t.skipped > 0) {
+    warnings.push(`${pluralize(t.skipped, "elemen")} tidak valid atau bertipe tidak dikenal dan dilewati.`);
+  }
+  if (t.deadBlobImages > 0) {
+    warnings.push(blobWarning(t.deadBlobImages));
+  }
+  if (t.badCrops > 0) {
+    warnings.push(`${pluralize(t.badCrops, "gambar")} punya nilai crop yang tidak valid; seluruh gambar ditampilkan.`);
+  }
+  if (t.migratedCircles > 0) {
     warnings.push(
-      `File memakai skema v${version}: posisi ${pluralize(migratedCircles, "lingkaran")} dimigrasi ke v${SCHEMA_VERSION}.`
+      `File memakai skema v${version}: posisi ${pluralize(t.migratedCircles, "lingkaran")} dimigrasi ke v${CENTRE_CIRCLE_LAST_SCHEMA + 1}.`
     );
   }
 
-  return { document: { version: SCHEMA_VERSION, canvas, elements }, warnings };
+  return { document: { version: SCHEMA_VERSION, pages }, warnings };
 }
 
 // ------------------------- Polotno -> KusukaEdit --------------------------
 
 function hasUnsupportedEffects(child: Record<string, unknown>): boolean {
+  const isPicture = child.type === "image" || child.type === "svg";
   if (typeof child.opacity === "number" && child.opacity < 1) return true;
+  if (child.shadowEnabled === true || child.blurEnabled === true) {
+    // A picture's blur and shadow are supported (ImageElement.blurRadius /
+    // shadow*); on text and shapes they are not.
+    if (!isPicture) return true;
+  }
   if (
-    child.shadowEnabled === true ||
-    child.blurEnabled === true ||
     child.brightnessEnabled === true ||
     child.sepiaEnabled === true ||
-    child.grayscaleEnabled === true ||
-    child.backgroundEnabled === true ||
-    child.curveEnabled === true
+    child.grayscaleEnabled === true
   ) {
-    return true;
+    // A picture's brightness / sepia / grayscale are supported (see
+    // lib/polotnoEffects.ts); on text and shapes they are not.
+    if (!isPicture) return true;
   }
+  if (child.backgroundEnabled === true || child.curveEnabled === true) return true;
   if (child.type === "text") {
     if (num(child.strokeWidth, 0) > 0) return true;
     if (num(child.letterSpacing, 0) !== 0) return true;
     if (typeof child.textDecoration === "string" && child.textDecoration !== "") return true;
     if (typeof child.textTransform === "string" && child.textTransform !== "none") return true;
   }
-  if (child.type === "image" || child.type === "svg") {
-    // flipX / flipY are supported (ImageElement.scaleX / scaleY).
-    if (num(child.cornerRadius, 0) > 0) return true;
-    if (typeof child.clipSrc === "string" && child.clipSrc !== "") return true;
+  if (isPicture) {
+    // Supported: flipX / flipY (scaleX / scaleY), borderSize (stroke), a circle
+    // or triangle clipSrc (maskShape), cornerRadius, and the contrast /
+    // saturation entries of `filters`. An unrecognised clipSrc is counted on
+    // its own (see `unknownMasks`).
     if (typeof child.maskSrc === "string" && child.maskSrc !== "") return true;
-    if (num(child.borderSize, 0) > 0) return true;
+    if (hasUnknownFilters(child.filters)) return true;
   }
   if (Array.isArray(child.dash) && child.dash.length > 0) return true;
   return false;
 }
 
 export interface ConvertOptions {
-  /** Which Polotno page becomes the canvas (the editor is single-page). Default 0. */
+  /**
+   * Import only this one page (0-based) of the Polotno document. Left out, EVERY
+   * page is imported, in order, as one page of the result.
+   */
   pageIndex?: number;
 }
 
-export function convertPolotnoToKusuka(
-  doc: PolotnoDocument,
-  options: ConvertOptions = {}
-): ConversionResult {
-  const warnings: string[] = [];
-  const pages = Array.isArray(doc.pages) ? doc.pages : [];
-  const pageIndex = options.pageIndex ?? 0;
-  const page = pages[pageIndex];
+/** Everything a Polotno import could not map 1:1, summed over all pages (reported once). */
+interface PolotnoTally {
+  skippedByType: Map<string, number>;
+  effectCount: number;
+  badColors: number;
+  badCrops: number;
+  deadBlobImages: number;
+  styledTexts: number;
+  ignoredTransforms: number;
+  unappliedSvgColors: number;
+  unknownMasks: number;
+  unknownFilters: number;
+  presetConflicts: number;
+  badBackgrounds: number;
+}
 
-  if (pages.length > 1) {
-    warnings.push(
-      `Dokumen Polotno punya ${pages.length} halaman; hanya halaman ${pageIndex + 1} yang diimpor.`
-    );
-  }
+function newPolotnoTally(): PolotnoTally {
+  return {
+    skippedByType: new Map(),
+    effectCount: 0,
+    badColors: 0,
+    badCrops: 0,
+    deadBlobImages: 0,
+    styledTexts: 0,
+    ignoredTransforms: 0,
+    unappliedSvgColors: 0,
+    unknownMasks: 0,
+    unknownFilters: 0,
+    presetConflicts: 0,
+    badBackgrounds: 0,
+  };
+}
 
-  const docWidth = num(doc.width, POLOTNO_DEFAULT_SIZE);
-  const docHeight = num(doc.height, POLOTNO_DEFAULT_SIZE);
+/**
+ * One Polotno page -> one native page. `usedIds` / `usedPageIds` are shared by
+ * all pages of the document, so an element id (and a page id) is unique across
+ * the whole result even when the file reuses ids on different pages.
+ */
+function convertPolotnoPage(
+  page: PolotnoPage | undefined,
+  docWidth: number,
+  docHeight: number,
+  usedIds: Set<string>,
+  usedPageIds: Set<string>,
+  t: PolotnoTally
+): Page {
   const canvas: CanvasMeta = {
     // A page may carry its own size; "auto" means "use the document size".
     width: Math.max(1, num(page?.width, docWidth)),
@@ -703,33 +833,25 @@ export function convertPolotnoToKusuka(
 
   if (page?.background !== undefined) {
     const parsed = parseColor(page.background);
-    if (parsed === null) {
-      warnings.push("Latar halaman berupa gambar/gradien (belum didukung); dipakai warna putih.");
-    } else {
-      canvas.backgroundColor = parsed;
-    }
+    if (parsed === null) t.badBackgrounds++;
+    else canvas.backgroundColor = parsed;
   }
 
-  const usedIds = new Set<string>();
+  let id = typeof page?.id === "string" ? page.id : "";
+  if (id === "" || usedPageIds.has(id)) id = newId();
+  usedPageIds.add(id);
+
   const elements: CanvasElement[] = [];
-  const skippedByType = new Map<string, number>();
-  let effectCount = 0;
-  let badColors = 0;
-  let badCrops = 0;
-  let deadBlobImages = 0;
-  let styledTexts = 0;
-  let ignoredTransforms = 0;
-  let unappliedSvgColors = 0;
 
   const skip = (label: string, count = 1) =>
-    skippedByType.set(label, (skippedByType.get(label) ?? 0) + count);
+    t.skippedByType.set(label, (t.skippedByType.get(label) ?? 0) + count);
 
   // A color the file specifies but we cannot read (gradient, pattern, an
   // unknown name) falls back to `fallback` — and is counted so the user is told.
   const color = (value: unknown, fallback: string): string => {
     const parsed = parseColor(value);
     if (parsed !== null) return parsed;
-    if (isColorSpecified(value)) badColors++;
+    if (isColorSpecified(value)) t.badColors++;
     return fallback;
   };
 
@@ -741,7 +863,7 @@ export function convertPolotnoToKusuka(
     if (fill !== null) return fill;
     const alternative = parseColor(child.color);
     if (alternative !== null) return alternative;
-    if (isColorSpecified(child.fill) || isColorSpecified(child.color)) badColors++;
+    if (isColorSpecified(child.fill) || isColorSpecified(child.color)) t.badColors++;
     return "#000000";
   };
 
@@ -768,7 +890,7 @@ export function convertPolotnoToKusuka(
 
       // Rich text arrives as HTML; Konva needs the plain string.
       const cleaned = cleanPolotnoText(str(child.text, ""));
-      if (cleaned.styled) styledTexts++;
+      if (cleaned.styled) t.styledTexts++;
 
       // Width tolerance (see TEXT_WIDTH_TOLERANCE). The box grows to the right,
       // so for centred / right-aligned text the left edge moves back by the
@@ -797,8 +919,8 @@ export function convertPolotnoToKusuka(
         lineHeight,
         ...(pad > 0 ? { widthTolerance: pad } : {}),
       };
-      if (hasUnsupportedEffects(child)) effectCount++;
-      if (hasIgnoredTransform(child)) ignoredTransforms++;
+      if (hasUnsupportedEffects(child)) t.effectCount++;
+      if (hasIgnoredTransform(child)) t.ignoredTransforms++;
       elements.push(el);
       return;
     }
@@ -820,8 +942,8 @@ export function convertPolotnoToKusuka(
         strokeWidth: Math.max(0, num(child.strokeWidth, 0)),
         cornerRadius: shapeType === "rect" ? Math.max(0, num(child.cornerRadius, 0)) : 0,
       };
-      if (hasUnsupportedEffects(child)) effectCount++;
-      if (hasIgnoredTransform(child)) ignoredTransforms++;
+      if (hasUnsupportedEffects(child)) t.effectCount++;
+      if (hasIgnoredTransform(child)) t.ignoredTransforms++;
       elements.push(el);
       return;
     }
@@ -837,19 +959,25 @@ export function convertPolotnoToKusuka(
       }
       // Crop values are fractions of the picture. Anything that cannot be a
       // fraction is not guessed at: the whole picture is shown instead.
-      const crop = readCrop(child) ?? (badCrops++, FULL_CROP);
+      const crop = readCrop(child) ?? (t.badCrops++, FULL_CROP);
 
       let src = child.src;
       if (vector && isRecord(child.colorsReplace) && Object.keys(child.colorsReplace).length > 0) {
         const recoloured = replaceSvgColors(src, child.colorsReplace);
-        if (recoloured === null) unappliedSvgColors++;
+        if (recoloured === null) t.unappliedSvgColors++;
         else src = recoloured;
       }
-      if (isObjectUrl(src)) deadBlobImages++;
+      if (isObjectUrl(src)) t.deadBlobImages++;
 
       // flipX / flipY / scaleX / scaleY -> scaleX / scaleY = ±1, with (x, y)
       // moved where a negative scale would have pushed the picture.
       const mirrored = readMirror(child, base());
+      // Blur, border, shadow and circle/triangle mask are carried over; only a
+      // mask of another shape is left out (and reported below).
+      const effects = readPolotnoImageEffects(child, color);
+      if (effects.unknownMask) t.unknownMasks++;
+      if (effects.unknownFilter) t.unknownFilters++;
+      if (effects.presetConflict) t.presetConflicts++;
       const el: ImageElement = {
         ...mirrored.fields,
         type: "image",
@@ -858,8 +986,9 @@ export function convertPolotnoToKusuka(
         scaleX: mirrored.scaleX,
         scaleY: mirrored.scaleY,
         ...(vector ? { vector: true } : {}),
+        ...effects.fields,
       };
-      if (hasUnsupportedEffects(child)) effectCount++;
+      if (hasUnsupportedEffects(child)) t.effectCount++;
       elements.push(el);
       return;
     }
@@ -877,42 +1006,93 @@ export function convertPolotnoToKusuka(
     skip(`tipe "${str(child.type, "?")}"`);
   });
 
-  skippedByType.forEach((count, label) => {
+
+  return { id, canvas, elements };
+}
+
+export function convertPolotnoToKusuka(
+  doc: PolotnoDocument,
+  options: ConvertOptions = {}
+): ConversionResult {
+  const warnings: string[] = [];
+  const allPages = Array.isArray(doc.pages) ? doc.pages : [];
+  const t = newPolotnoTally();
+
+  // Every page, unless the caller asked for one.
+  const wanted: Array<PolotnoPage | undefined> =
+    options.pageIndex === undefined ? allPages : [allPages[options.pageIndex]];
+
+  const docWidth = num(doc.width, POLOTNO_DEFAULT_SIZE);
+  const docHeight = num(doc.height, POLOTNO_DEFAULT_SIZE);
+
+  const usedIds = new Set<string>();
+  const usedPageIds = new Set<string>();
+  const pages: Page[] = [];
+  for (const page of wanted) {
+    pages.push(convertPolotnoPage(isRecord(page) ? (page as PolotnoPage) : undefined, docWidth, docHeight, usedIds, usedPageIds, t));
+  }
+  if (pages.length === 0) {
+    // A document always has a page.
+    pages.push(convertPolotnoPage(undefined, docWidth, docHeight, usedIds, usedPageIds, t));
+    warnings.push("Dokumen Polotno tidak berisi halaman; dibuat satu halaman kosong.");
+  }
+
+  t.skippedByType.forEach((count, label) => {
     warnings.push(`${pluralize(count, "elemen")} ${label} belum didukung dan dilewati.`);
   });
-  if (deadBlobImages > 0) {
-    warnings.push(blobWarning(deadBlobImages));
-  }
-  if (badCrops > 0) {
-    warnings.push(`${pluralize(badCrops, "gambar")} punya nilai crop yang tidak valid; seluruh gambar ditampilkan.`);
-  }
-  if (badColors > 0) {
+  if (t.badBackgrounds > 0) {
     warnings.push(
-      `${pluralize(badColors, "warna")} (gradien, pola, atau nama warna yang tidak dikenal) tidak didukung; dipakai warna bawaan.`
+      `${pluralize(t.badBackgrounds, "halaman")} memakai latar gambar/gradien (belum didukung); dipakai warna putih.`
     );
   }
-  if (styledTexts > 0) {
+  if (t.deadBlobImages > 0) {
+    warnings.push(blobWarning(t.deadBlobImages));
+  }
+  if (t.badCrops > 0) {
+    warnings.push(`${pluralize(t.badCrops, "gambar")} punya nilai crop yang tidak valid; seluruh gambar ditampilkan.`);
+  }
+  if (t.badColors > 0) {
     warnings.push(
-      `${pluralize(styledTexts, "teks")} berformat per bagian (kata tebal, warna berbeda, tautan) diubah menjadi teks polos; gaya per bagian tidak dibawa.`
+      `${pluralize(t.badColors, "warna")} (gradien, pola, atau nama warna yang tidak dikenal) tidak didukung; dipakai warna bawaan.`
     );
   }
-  if (unappliedSvgColors > 0) {
+  if (t.styledTexts > 0) {
     warnings.push(
-      `${pluralize(unappliedSvgColors, "SVG")} memakai penggantian warna (colorsReplace) yang tidak bisa diterapkan (sumbernya bukan data URI SVG, atau warnanya tidak ditemukan); warna aslinya dipakai.`
+      `${pluralize(t.styledTexts, "teks")} berformat per bagian (kata tebal, warna berbeda, tautan) diubah menjadi teks polos; gaya per bagian tidak dibawa.`
     );
   }
-  if (ignoredTransforms > 0) {
+  if (t.unappliedSvgColors > 0) {
     warnings.push(
-      `${pluralize(ignoredTransforms, "teks atau bentuk")} memakai skala atau pencerminan (scaleX/scaleY/flip) yang belum didukung; diabaikan.`
+      `${pluralize(t.unappliedSvgColors, "SVG")} memakai penggantian warna (colorsReplace) yang tidak bisa diterapkan (sumbernya bukan data URI SVG, atau warnanya tidak ditemukan); warna aslinya dipakai.`
     );
   }
-  if (effectCount > 0) {
+  if (t.ignoredTransforms > 0) {
     warnings.push(
-      `${pluralize(effectCount, "elemen")} memakai efek yang belum didukung (opacity, bayangan, blur, dll.); tampilan bisa sedikit berbeda.`
+      `${pluralize(t.ignoredTransforms, "teks atau bentuk")} memakai skala atau pencerminan (scaleX/scaleY/flip) yang belum didukung; diabaikan.`
+    );
+  }
+  if (t.unknownMasks > 0) {
+    warnings.push(
+      `${pluralize(t.unknownMasks, "gambar")} memakai mask (clipSrc) selain lingkaran atau segitiga, atau yang bentuknya tidak bisa dikenali dari berkasnya; mask diabaikan dan gambar tampil persegi.`
+    );
+  }
+  if (t.unknownFilters > 0) {
+    warnings.push(
+      `${pluralize(t.unknownFilters, "gambar")} memakai filter (objek filters) selain kontras dan saturasi; filter itu diabaikan.`
+    );
+  }
+  if (t.presetConflicts > 0) {
+    warnings.push(
+      `${pluralize(t.presetConflicts, "gambar")} mengaktifkan grayscale dan sepia sekaligus; hanya grayscale yang dipakai.`
+    );
+  }
+  if (t.effectCount > 0) {
+    warnings.push(
+      `${pluralize(t.effectCount, "elemen")} memakai efek yang belum didukung (opacity, bayangan/blur/filter warna pada teks dan bentuk, dll.); tampilan bisa sedikit berbeda.`
     );
   }
 
-  return { document: { version: SCHEMA_VERSION, canvas, elements }, warnings };
+  return { document: { version: SCHEMA_VERSION, pages }, warnings };
 }
 
 // ------------------------- KusukaEdit -> Polotno --------------------------
@@ -994,35 +1174,50 @@ function toPolotnoElement(el: CanvasElement): PolotnoElement {
     cornerRadius: 0,
     flipX: el.scaleX === -1,
     flipY: el.scaleY === -1,
+    // blur / border / shadow / mask / corner radius / colour filter: only the
+    // ones that are on are written (a corner radius replaces the 0 above).
+    ...imageEffectsToPolotno(el, OWN_EXPORT_SOURCE),
   };
 }
 
-export function convertKusukaToPolotno(doc: CanvasDocument): PolotnoDocument {
+function toPolotnoPage(page: Page, doc: { width: number; height: number }): PolotnoPage {
   // Polotno has no zIndex: stacking order IS the array order, so sort
   // (stable, ties keep their current order) and write children bottom-first.
-  const ordered = doc.elements
+  const ordered = page.elements
     .map((el, index) => ({ el, index }))
     .sort((a, b) => a.el.zIndex - b.el.zIndex || a.index - b.index)
     .map(({ el }) => el);
 
+  // A page of the document's size says "auto"; one of its own size says so.
+  const sameWidth = page.canvas.width === doc.width;
+  const sameHeight = page.canvas.height === doc.height;
+  return {
+    id: page.id,
+    children: ordered.map(toPolotnoElement),
+    width: sameWidth ? "auto" : page.canvas.width,
+    height: sameHeight ? "auto" : page.canvas.height,
+    background: page.canvas.backgroundColor,
+    bleed: 0,
+    duration: 5000,
+  };
+}
+
+/**
+ * Every page of the document is written, in order. Polotno keeps one default
+ * size for the document (`width` / `height`); it is the size of the first page,
+ * and a page of another size carries its own numbers.
+ */
+export function convertKusukaToPolotno(doc: CanvasDocument): PolotnoDocument {
+  const first = doc.pages[0]?.canvas ?? DEFAULT_CANVAS;
+  const size = { width: first.width, height: first.height };
   return {
     schemaVersion: POLOTNO_SCHEMA_VERSION,
-    width: doc.canvas.width,
-    height: doc.canvas.height,
+    width: size.width,
+    height: size.height,
     unit: "px",
     dpi: 72,
     fonts: [],
-    pages: [
-      {
-        id: "page-1",
-        children: ordered.map(toPolotnoElement),
-        width: "auto",
-        height: "auto",
-        background: doc.canvas.backgroundColor,
-        bleed: 0,
-        duration: 5000,
-      },
-    ],
+    pages: doc.pages.map((page) => toPolotnoPage(page, size)),
     audios: [],
   };
 }
@@ -1060,6 +1255,6 @@ export function parseDocument(input: unknown): ParseResult {
 
   return {
     ok: false,
-    error: "Format tidak dikenali. Berkas harus berformat KusukaEdit (canvas + elements) atau Polotno (pages + children).",
+    error: "Format tidak dikenali. Berkas harus berformat KusukaEdit (pages + elements, atau canvas + elements) atau Polotno (pages + children).",
   };
 }

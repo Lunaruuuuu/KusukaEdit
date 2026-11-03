@@ -7,9 +7,20 @@ import type { CanvasElement, ImageElement } from "@/types/editor";
 import { useEditorStore } from "@/store/useEditorStore";
 import { useLoadedImage } from "@/lib/useLoadedImage";
 import { drawPicture, drawPictureHitBox, type PictureContext } from "@/lib/drawPicture";
+import { cropToSourcePixels } from "@/lib/crop";
+import {
+  applyImageBlur,
+  blurCacheConfig,
+  clearImageBlur,
+  resolveImageEffects,
+  type BlurNode,
+} from "@/lib/imageEffects";
+import { filterKey, filterPicture } from "@/lib/imageFilters";
 
 interface Props {
   element: CanvasElement;
+  /** View zoom (1 = 100%): a blurred picture is cached at the resolution it is shown at. */
+  zoom: number;
   onSelect: () => void;
   registerNode: (id: string, node: Konva.Node | null) => void;
 }
@@ -40,26 +51,44 @@ const PLACEHOLDER_ERROR_STROKE = "#ef4444";
 // The Konva node is ALWAYS the same kind of node (a Shape), loaded or not.
 // Swapping node types when the picture finishes loading would leave the
 // Transformer holding a node that no longer exists.
-function ImageNode({ element, common }: { element: ImageElement; common: CommonKonvaProps }) {
+function ImageNode({
+  element,
+  common,
+  zoom,
+}: {
+  element: ImageElement;
+  common: CommonKonvaProps;
+  zoom: number;
+}) {
   const { image, status } = useLoadedImage(element.src);
   const loaded = status === "loaded" && image !== null;
+  const setCroppingId = useEditorStore((s) => s.setCroppingId);
+  // While the crop overlay is open over this picture, the overlay shows the
+  // picture (whole, with the crop window) and this node steps aside.
+  const isCropping = useEditorStore((s) => s.croppingId === element.id && s.selectedId === element.id);
 
-  // Crop is stored as fractions of the picture; Konva wants source pixels.
-  // The whole picture needs no crop at all — and without one Konva draws the
-  // picture straight into its box, which is also how a vector picture (SVG)
-  // stays sharp at any size.
-  const crop = useMemo(() => {
-    if (!image || image.naturalWidth === 0 || image.naturalHeight === 0) return undefined;
-    const whole =
-      element.cropX === 0 && element.cropY === 0 && element.cropWidth === 1 && element.cropHeight === 1;
-    if (whole) return undefined;
-    return {
-      x: element.cropX * image.naturalWidth,
-      y: element.cropY * image.naturalHeight,
-      width: element.cropWidth * image.naturalWidth,
-      height: element.cropHeight * image.naturalHeight,
-    };
-  }, [image, element.cropX, element.cropY, element.cropWidth, element.cropHeight]);
+  // Crop is stored as fractions (0..1) of the picture; the canvas wants SOURCE
+  // pixels (what Konva.Image calls its `crop`: x, y, width, height in the
+  // picture's own pixels), so the fractions are scaled by naturalWidth /
+  // naturalHeight. The whole picture needs no crop at all — and without one
+  // the picture is drawn straight into its box, which is also how a vector
+  // picture (SVG) stays sharp at any size.
+  const crop = useMemo(
+    () =>
+      image
+        ? cropToSourcePixels(
+            {
+              cropX: element.cropX,
+              cropY: element.cropY,
+              cropWidth: element.cropWidth,
+              cropHeight: element.cropHeight,
+            },
+            image.naturalWidth,
+            image.naturalHeight
+          )
+        : undefined,
+    [image, element.cropX, element.cropY, element.cropWidth, element.cropHeight]
+  );
 
   // Mirroring (scaleX / scaleY = -1) is done INSIDE the drawing, not with a
   // negative scale on the node. The node keeps a plain positive scale, so the
@@ -73,31 +102,129 @@ function ImageNode({ element, common }: { element: ImageElement; common: CommonK
   const flipY = element.scaleY === -1;
   const { width, height } = element;
 
+  // Effects. Border, shadow and mask are drawn by drawPicture() from the
+  // node's own stroke / shadow attributes; the blur is a Konva filter.
+  const fx = resolveImageEffects(element);
+  const mask = fx.mask;
+  const cornerRadius = fx.cornerRadius; // 0 under a mask
+  // A picture cut to a mask or to rounded corners is drawn through a clip.
+  const clipped = mask !== null || cornerRadius > 0;
+  const stroke = loaded ? fx.stroke : null;
+  const shadow = loaded ? fx.shadow : null;
+  const blur = loaded ? fx.blur : 0;
+  const filter = loaded ? fx.filter : null;
+  const colourKey = filterKey(filter);
+
+  // Colour filter (brightness, contrast, saturation, preset): a filtered COPY
+  // of the visible part of the picture, made once per change of picture, crop
+  // or filter — not on every redraw. It covers the picture only, so the
+  // border and the shadow keep their own colours. null = no filter, or the
+  // browser would not let us read the pixels (cross-origin without CORS): the
+  // picture is then drawn as it is.
+  const filtered = useMemo(() => {
+    if (!filter || !image) return null;
+    const naturalWidth = image.naturalWidth || Math.max(1, Math.round(element.width * 2));
+    const naturalHeight = image.naturalHeight || Math.max(1, Math.round(element.height * 2));
+    return filterPicture(
+      { image, crop: crop ?? { x: 0, y: 0, width: naturalWidth, height: naturalHeight } },
+      filter
+    );
+    // `filter` is described by `colourKey`; `crop` by its four numbers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [image, colourKey, crop?.x, crop?.y, crop?.width, crop?.height]);
+
+  // The node's own ref (for the blur) is composed with the shared one that
+  // registers the node for the Transformer.
+  const { ref: registerRef, ...commonRest } = common;
+  const nodeRef = useRef<Konva.Shape | null>(null);
+  const setRefs = useCallback(
+    (node: Konva.Node | null) => {
+      nodeRef.current = node as Konva.Shape | null;
+      registerRef(node);
+    },
+    [registerRef]
+  );
+
+  // Konva.Filters.Blur works on a CACHED bitmap of the node (node.cache()),
+  // and a cache is a snapshot: it does not follow later changes. So the blur is
+  // (re)applied whenever anything that changes how the picture looks changes —
+  // and switched off again (the cache dropped) when the blur goes away.
+  const cropKey = crop ? `${crop.x}|${crop.y}|${crop.width}|${crop.height}` : "";
+  const strokeKey = stroke ? `${stroke.color}|${stroke.width}` : "";
+  const shadowKey = shadow
+    ? `${shadow.color}|${shadow.blur}|${shadow.offsetX}|${shadow.offsetY}|${shadow.opacity}`
+    : "";
+  useLayoutEffect(() => {
+    const node = nodeRef.current;
+    if (!node) return;
+    if (blur > 0) {
+      const deviceRatio = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+      applyImageBlur(
+        node as unknown as BlurNode,
+        Konva.Filters.Blur,
+        blurCacheConfig(blur, { zoom, deviceRatio, width, height })
+      );
+    } else {
+      clearImageBlur(node as unknown as BlurNode);
+    }
+    node.getLayer()?.batchDraw();
+  }, [blur, loaded, image, filtered, zoom, width, height, cropKey, flipX, flipY, mask, cornerRadius, strokeKey, shadowKey]);
+
+  const startCropping = () => {
+    common.onClick(); // select it first
+    setCroppingId(element.id);
+  };
+
   return (
     <Shape
-      {...common}
+      {...commonRest}
+      ref={setRefs}
       width={width}
       height={height}
-      fill={loaded ? undefined : PLACEHOLDER_FILL}
-      stroke={loaded ? undefined : status === "error" ? PLACEHOLDER_ERROR_STROKE : PLACEHOLDER_STROKE}
-      strokeWidth={loaded ? 0 : 2}
+      visible={!isCropping}
+      // A loaded picture has no fill — except that a cut picture (masked, or
+      // with rounded corners) with a shadow gets an opaque one: drawPicture()
+      // casts the shadow from a silhouette of the outline, painted with it (it
+      // is clipped away, only the shadow it casts is seen).
+      fill={loaded ? (clipped && shadow !== null ? "#000000" : undefined) : PLACEHOLDER_FILL}
+      stroke={loaded ? stroke?.color : status === "error" ? PLACEHOLDER_ERROR_STROKE : PLACEHOLDER_STROKE}
+      strokeWidth={loaded ? (stroke?.width ?? 0) : 2}
       dash={loaded ? undefined : [8, 6]}
+      shadowEnabled={shadow !== null}
+      shadowColor={shadow?.color}
+      shadowBlur={shadow?.blur ?? 0}
+      shadowOffsetX={shadow?.offsetX ?? 0}
+      shadowOffsetY={shadow?.offsetY ?? 0}
+      shadowOpacity={shadow?.opacity ?? 1}
+      // Shadow attributes are applied to every drawing call of the scene
+      // function (see drawPicture); the "perfect draw" buffer would apply one
+      // shadow to the finished composite instead.
+      perfectDrawEnabled={false}
+      onDblClick={startCropping}
+      onDblTap={startCropping}
       sceneFunc={(context, shape) =>
         drawPicture(context as unknown as PictureContext, shape, {
           width,
           height,
-          image: loaded ? image : null,
-          crop,
+          // the filtered copy already holds exactly the visible part
+          image: loaded ? (filtered ?? image) : null,
+          crop: filtered ? undefined : crop,
           flipX,
           flipY,
+          mask,
+          cornerRadius,
+          shadow: shadow !== null,
+          stroke: stroke !== null,
         })
       }
-      hitFunc={(context, shape) => drawPictureHitBox(context as unknown as PictureContext, shape, width, height)}
+      hitFunc={(context, shape) =>
+        drawPictureHitBox(context as unknown as PictureContext, shape, width, height, mask, cornerRadius)
+      }
     />
   );
 }
 
-export default function ElementRenderer({ element, onSelect, registerNode }: Props) {
+export default function ElementRenderer({ element, zoom, onSelect, registerNode }: Props) {
   const updateElement = useEditorStore((s) => s.updateElement);
   const syncMeasuredHeight = useEditorStore((s) => s.syncMeasuredHeight);
   const setEditingId = useEditorStore((s) => s.setEditingId);
@@ -248,5 +375,5 @@ export default function ElementRenderer({ element, onSelect, registerNode }: Pro
 
   // Drag and transform both end in updateElement(), which records the
   // "before" state through the store's debounced history (one undo step per gesture).
-  return <ImageNode element={element} common={commonProps} />;
+  return <ImageNode element={element} common={commonProps} zoom={zoom} />;
 }

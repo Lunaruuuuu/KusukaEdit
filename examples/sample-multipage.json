@@ -1,0 +1,148 @@
+{
+  "version": 3,
+  "pages": [
+    {
+      "id": "mp-page-1",
+      "canvas": {
+        "width": 900,
+        "height": 600,
+        "backgroundColor": "#0f172a"
+      },
+      "elements": [
+        {
+          "id": "mp1-card",
+          "type": "shape",
+          "shapeType": "rect",
+          "x": 60,
+          "y": 60,
+          "width": 780,
+          "height": 480,
+          "rotation": 0,
+          "zIndex": 1,
+          "fill": "#1e293b",
+          "stroke": "#1e293b",
+          "strokeWidth": 0,
+          "cornerRadius": 16
+        },
+        {
+          "id": "mp1-title",
+          "type": "text",
+          "x": 100,
+          "y": 200,
+          "width": 700,
+          "height": 62.4,
+          "rotation": 0,
+          "zIndex": 2,
+          "text": "Laporan KP — Halaman 1",
+          "fontSize": 52,
+          "fontFamily": "Inter, sans-serif",
+          "fontStyle": "bold",
+          "fill": "#f8fafc",
+          "align": "center",
+          "lineHeight": 1.2
+        },
+        {
+          "id": "mp1-sub",
+          "type": "text",
+          "x": 100,
+          "y": 300,
+          "width": 700,
+          "height": 33.6,
+          "rotation": 0,
+          "zIndex": 3,
+          "text": "Dokumen dengan beberapa halaman",
+          "fontSize": 28,
+          "fontFamily": "Inter, sans-serif",
+          "fontStyle": "bold",
+          "fill": "#38bdf8",
+          "align": "center",
+          "lineHeight": 1.2
+        }
+      ]
+    },
+    {
+      "id": "mp-page-2",
+      "canvas": {
+        "width": 900,
+        "height": 600,
+        "backgroundColor": "#fef3c7"
+      },
+      "elements": [
+        {
+          "id": "mp2-title",
+          "type": "text",
+          "x": 100,
+          "y": 80,
+          "width": 700,
+          "height": 57.6,
+          "rotation": 0,
+          "zIndex": 1,
+          "text": "Halaman 2",
+          "fontSize": 48,
+          "fontFamily": "Inter, sans-serif",
+          "fontStyle": "bold",
+          "fill": "#78350f",
+          "align": "center",
+          "lineHeight": 1.2
+        },
+        {
+          "id": "mp2-box",
+          "type": "shape",
+          "shapeType": "rect",
+          "x": 150,
+          "y": 220,
+          "width": 250,
+          "height": 250,
+          "rotation": 0,
+          "zIndex": 2,
+          "fill": "#f59e0b",
+          "stroke": "#1e293b",
+          "strokeWidth": 0,
+          "cornerRadius": 16
+        },
+        {
+          "id": "mp2-circle",
+          "type": "shape",
+          "shapeType": "circle",
+          "x": 500,
+          "y": 220,
+          "width": 250,
+          "height": 250,
+          "rotation": 0,
+          "zIndex": 3,
+          "fill": "#b45309",
+          "stroke": "#1e293b",
+          "strokeWidth": 0,
+          "cornerRadius": 0
+        }
+      ]
+    },
+    {
+      "id": "mp-page-3",
+      "canvas": {
+        "width": 600,
+        "height": 600,
+        "backgroundColor": "#ecfdf5"
+      },
+      "elements": [
+        {
+          "id": "mp3-title",
+          "type": "text",
+          "x": 50,
+          "y": 230,
+          "width": 500,
+          "height": 48,
+          "rotation": 0,
+          "zIndex": 1,
+          "text": "Halaman 3 (persegi)",
+          "fontSize": 40,
+          "fontFamily": "Inter, sans-serif",
+          "fontStyle": "bold",
+          "fill": "#065f46",
+          "align": "center",
+          "lineHeight": 1.2
+        }
+      ]
+    }
+  ]
+}

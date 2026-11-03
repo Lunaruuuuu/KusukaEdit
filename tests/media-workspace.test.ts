@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, run } from "./harness";
+import { E, C, onePage, mkPage } from "./helpers";
 import {
   CANVAS_LIMITS,
   MAX_EXPORT_SIDE,
@@ -50,16 +51,17 @@ const S = () => useEditorStore.getState();
 async function hardReset() {
   await sleep(600);
   useEditorStore.setState({
-    elements: [],
+    pages: [mkPage("page-1", { width: 900, height: 600, backgroundColor: "#ffffff" })],
+    currentPageIndex: 0,
     selectedId: null,
     editingId: null,
+    croppingId: null,
     clipboard: null,
     past: [],
     future: [],
-    canvas: { width: 900, height: 600, backgroundColor: "#ffffff" },
   });
 }
-const imageOf = (id: string) => S().elements.find((e) => e.id === id) as ImageElement;
+const imageOf = (id: string) => E().find((e) => e.id === id) as ImageElement;
 
 // =============================================================== workspace
 test("workspace: clampDimension rounds, clamps to 50..4000 and falls back on garbage", () => {
@@ -154,7 +156,7 @@ test("store: addImageElement — fitted, centred, on top, selected, one undo ste
   const past = S().past.length;
   S().addImageElement({ src: url, naturalWidth: 4000, naturalHeight: 3000 });
 
-  const img = S().elements[S().elements.length - 1] as ImageElement;
+  const img = E()[E().length - 1] as ImageElement;
   assert.equal(img.type, "image");
   assert.equal(img.src, url);
   assert.ok(Math.abs(img.width / img.height - 4 / 3) < 0.01, "natural aspect ratio");
@@ -163,15 +165,15 @@ test("store: addImageElement — fitted, centred, on top, selected, one undo ste
   assert.ok(Math.abs(img.y + img.height / 2 - 300) < 1, "centred vertically");
   assert.deepEqual([img.cropX, img.cropY, img.cropWidth, img.cropHeight], [0, 0, 1, 1]);
   assert.equal(img.rotation, 0);
-  assert.equal(img.zIndex, Math.max(...S().elements.map((e) => e.zIndex)));
+  assert.equal(img.zIndex, Math.max(...E().map((e) => e.zIndex)));
   assert.equal(S().selectedId, img.id);
   assert.equal(S().past.length, past + 1);
   assert.equal(isTrackedObjectUrl(url), true);
 
   S().undo();
-  assert.ok(!S().elements.some((e) => e.id === img.id));
+  assert.ok(!E().some((e) => e.id === img.id));
   S().redo();
-  assert.ok(S().elements.some((e) => e.id === img.id));
+  assert.ok(E().some((e) => e.id === img.id));
   S().reset();
 });
 
@@ -179,15 +181,15 @@ test("store: deleting a picture does NOT revoke its URL while Undo can still bri
   S().reset();
   const url = makeBlobUrl();
   S().addImageElement({ src: url, naturalWidth: 300, naturalHeight: 200 });
-  const id = S().elements[0].id;
+  const id = E()[0].id;
 
   revoked.length = 0;
   S().removeElement(id);
-  assert.equal(S().elements.length, 0);
+  assert.equal(E().length, 0);
   assert.ok(!revoked.includes(url), "still referenced by the history stack");
 
   S().undo();
-  assert.equal(S().elements.length, 1, "the picture is back");
+  assert.equal(E().length, 1, "the picture is back");
   assert.equal(imageOf(id).src, url);
   assert.ok(!revoked.includes(url), "and its URL is still valid");
   S().reset();
@@ -197,7 +199,7 @@ test("store: a deleted picture's URL is revoked once it has fallen out of the hi
   S().reset();
   const url = makeBlobUrl();
   S().addImageElement({ src: url, naturalWidth: 300, naturalHeight: 200 });
-  S().removeElement(S().elements[0].id);
+  S().removeElement(E()[0].id);
 
   revoked.length = 0;
   // MAX_HISTORY is 50: push enough discrete steps that no snapshot holds the picture.
@@ -213,7 +215,7 @@ test("store: replacing a picture keeps position and width, follows the new aspec
   const oldUrl = makeBlobUrl();
   const newUrl = makeBlobUrl();
   S().addImageElement({ src: oldUrl, naturalWidth: 400, naturalHeight: 400 });
-  const id = S().elements[0].id;
+  const id = E()[0].id;
   S().updateElement(id, { x: 100, y: 50, width: 200, height: 200, rotation: 25, cropX: 0.1, cropWidth: 0.5 });
 
   S().replaceImageSource(id, { src: newUrl, naturalWidth: 800, naturalHeight: 400 });
@@ -237,10 +239,10 @@ test("store: reset() is undoable, so the pictures it clears stay valid until the
   await hardReset();
   const a = makeBlobUrl();
   S().addImageElement({ src: a, naturalWidth: 100, naturalHeight: 100 });
-  const id = S().elements[0].id;
+  const id = E()[0].id;
   revoked.length = 0;
   S().reset();
-  assert.equal(S().elements.length, 0);
+  assert.equal(E().length, 0);
   assert.ok(!revoked.includes(a), "\"Kosongkan Kanvas\" can be undone, so the picture must survive it");
   S().undo();
   assert.equal(imageOf(id).src, a);
@@ -251,7 +253,7 @@ test("store: the clipboard keeps a copied picture's URL alive until it holds som
   const url = makeBlobUrl();
   S().addImageElement({ src: url, naturalWidth: 100, naturalHeight: 100 });
   S().copySelected();
-  S().removeElement(S().elements[0].id);
+  S().removeElement(E()[0].id);
   // forget every snapshot that showed the picture: only the clipboard still has it
   useEditorStore.setState({ past: [], future: [] });
 
@@ -261,13 +263,13 @@ test("store: the clipboard keeps a copied picture's URL alive until it holds som
 
   // pasting it back still works, with the same URL
   assert.equal(S().pasteClipboard(), true);
-  const pasted = S().elements[S().elements.length - 1] as ImageElement;
+  const pasted = E()[E().length - 1] as ImageElement;
   assert.equal(pasted.src, url);
 
   // once the clipboard holds something else (and nothing else shows it) it is released
   S().removeElement(pasted.id);
   useEditorStore.setState({ past: [], future: [] });
-  S().setSelectedId(S().elements[0].id);
+  S().setSelectedId(E()[0].id);
   S().copySelected();
   assert.ok(revoked.includes(url), "released once the clipboard holds something else");
 });
@@ -275,7 +277,7 @@ test("store: the clipboard keeps a copied picture's URL alive until it holds som
 test("store: moving/scaling/rotating a picture is ONE debounced history step", async () => {
   await hardReset();
   S().addImageElement({ src: makeBlobUrl(), naturalWidth: 400, naturalHeight: 200 });
-  const id = S().elements[0].id;
+  const id = E()[0].id;
   await sleep(600); // let the "add" settle
   const before = { ...imageOf(id) };
   const past = S().past.length;
@@ -303,7 +305,7 @@ test("store: gestures on two different pictures are two undo steps", async () =>
   await hardReset();
   S().addImageElement({ src: makeBlobUrl(), naturalWidth: 100, naturalHeight: 100 });
   S().addImageElement({ src: makeBlobUrl(), naturalWidth: 100, naturalHeight: 100 });
-  const [a, b] = S().elements.map((e) => e.id);
+  const [a, b] = E().map((e) => e.id);
   await sleep(600);
   const past = S().past.length;
   S().updateElement(a, { x: 11 });
@@ -319,16 +321,16 @@ test("store: gestures on two different pictures are two undo steps", async () =>
 test("store: setCanvasMeta clamps, rounds, normalises color and ignores garbage", () => {
   S().reset();
   S().setCanvasMeta({ width: 10 });
-  assert.equal(S().canvas.width, 50);
+  assert.equal(C().width, 50);
   S().setCanvasMeta({ width: 99999, height: 1234.4 });
-  assert.deepEqual([S().canvas.width, S().canvas.height], [4000, 1234]);
+  assert.deepEqual([C().width, C().height], [4000, 1234]);
   S().setCanvasMeta({ width: NaN as unknown as number });
-  assert.equal(S().canvas.width, 4000, "NaN keeps the current size");
+  assert.equal(C().width, 4000, "NaN keeps the current size");
   S().setCanvasMeta({ backgroundColor: "red" });
-  assert.equal(S().canvas.backgroundColor, "#ff0000");
-  const before = S().canvas.backgroundColor;
+  assert.equal(C().backgroundColor, "#ff0000");
+  const before = C().backgroundColor;
   S().setCanvasMeta({ backgroundColor: "not-a-color" });
-  assert.equal(S().canvas.backgroundColor, before);
+  assert.equal(C().backgroundColor, before);
   S().reset();
 });
 
@@ -336,8 +338,8 @@ test("store: setCanvasMeta — no-op creates no history; a burst is one undo ste
   await hardReset();
   S().addShapeElement("rect");
   await sleep(600);
-  const original = { ...S().canvas };
-  const rect = { ...S().elements[0] };
+  const original = { ...C() };
+  const rect = { ...E()[0] };
   const past = S().past.length;
 
   S().setCanvasMeta({ width: original.width, height: original.height });
@@ -348,16 +350,16 @@ test("store: setCanvasMeta — no-op creates no history; a burst is one undo ste
   S().setCanvasMeta({ height: 675 });
   await sleep(650);
   assert.equal(S().past.length, past + 1);
-  assert.deepEqual([S().canvas.width, S().canvas.height], [1200, 675]);
-  assert.deepEqual(S().elements[0], rect, "elements keep their coordinates when the canvas is resized");
+  assert.deepEqual([C().width, C().height], [1200, 675]);
+  assert.deepEqual(E()[0], rect, "elements keep their coordinates when the canvas is resized");
 
   S().undo();
-  assert.deepEqual(S().canvas, original);
+  assert.deepEqual(C(), original);
   S().redo();
-  assert.deepEqual([S().canvas.width, S().canvas.height], [1200, 675]);
+  assert.deepEqual([C().width, C().height], [1200, 675]);
 
   // the exported picture follows the workspace
-  const plan = resolveExportPixelRatio(S().canvas.width, S().canvas.height, 2);
+  const plan = resolveExportPixelRatio(C().width, C().height, 2);
   assert.deepEqual([plan.outputWidth, plan.outputHeight], [2400, 1350]);
   S().reset();
 });
@@ -366,16 +368,16 @@ test("store: exportToJSON embeds uploaded blob: pictures as data: URLs and leave
   S().reset();
   const url = makeBlobUrl();
   S().addImageElement({ src: url, naturalWidth: 300, naturalHeight: 200 });
-  const liveBefore = JSON.stringify(S().elements);
+  const liveBefore = JSON.stringify(E());
 
   const { json, warnings } = await S().exportToJSON("kusuka");
   assert.deepEqual(warnings, []);
   const doc = JSON.parse(json) as CanvasDocument;
-  const el = doc.elements[0] as ImageElement;
+  const el = doc.pages[0].elements[0] as ImageElement;
   assert.match(el.src, /^data:image\/png;base64,/);
   const bytes = Buffer.from(el.src.split(",")[1], "base64");
   assert.deepEqual([...bytes], [...PNG_BYTES], "the file carries the picture's real bytes");
-  assert.equal(JSON.stringify(S().elements), liveBefore, "the editor keeps using the cheap blob URL");
+  assert.equal(JSON.stringify(E()), liveBefore, "the editor keeps using the cheap blob URL");
 
   // the Polotno flavour embeds too, and survives a full import
   const polotno = JSON.parse((await S().exportToJSON("polotno")).json);
@@ -384,7 +386,7 @@ test("store: exportToJSON embeds uploaded blob: pictures as data: URLs and leave
   const loaded = S().loadFromJSON(json);
   assert.ok(loaded.ok);
   assert.deepEqual(loaded.ok && loaded.warnings, []);
-  assert.equal((S().elements[0] as ImageElement).src, el.src);
+  assert.equal((E()[0] as ImageElement).src, el.src);
   S().reset();
 });
 
@@ -392,16 +394,12 @@ test("store: a picture whose blob URL is dead is reported on export, never dropp
   S().reset();
   const dead = makeBlobUrl();
   realRevoke(dead);
-  const doc: CanvasDocument = {
-    version: 2,
-    canvas: { width: 900, height: 600, backgroundColor: "#ffffff" },
-    elements: [
-      { id: "i", type: "image", x: 0, y: 0, width: 10, height: 10, rotation: 0, zIndex: 1, src: dead, cropX: 0, cropY: 0, cropWidth: 1, cropHeight: 1, scaleX: 1, scaleY: 1 },
-    ],
-  };
+  const doc: CanvasDocument = onePage({ width: 900, height: 600, backgroundColor: "#ffffff" }, [
+    { id: "i", type: "image", x: 0, y: 0, width: 10, height: 10, rotation: 0, zIndex: 1, src: dead, cropX: 0, cropY: 0, cropWidth: 1, cropHeight: 1, scaleX: 1, scaleY: 1 },
+  ]);
   const r = await embedObjectUrls(doc);
-  assert.equal(r.document.elements.length, 1);
-  assert.equal((r.document.elements[0] as ImageElement).src, dead);
+  assert.equal(r.document.pages[0].elements.length, 1);
+  assert.equal((r.document.pages[0].elements[0] as ImageElement).src, dead);
   assert.match(r.warnings.join(" "), /1 gambar tidak bisa dibaca lagi/);
 });
 
@@ -413,7 +411,7 @@ test("import: a blob: picture from an old file is flagged (the URL died with its
   });
   assert.ok(r.ok);
   assert.match(r.ok ? r.warnings.join(" ") : "", /blob:/);
-  assert.equal(r.ok && r.document.elements.length, 1, "kept, shown as a placeholder");
+  assert.equal(r.ok && r.document.pages[0].elements.length, 1, "kept, shown as a placeholder");
 });
 
 // ================================================================= adapter
@@ -433,12 +431,34 @@ test("adapter: nested pages[].children are flattened to one ordered array, group
       { id: "r", type: "figure", subType: "rect", x: 1, y: 2, width: 3, height: 4 },
     ])
   );
-  assert.deepEqual(d.elements.map((e) => e.id), ["t", "i", "r"]);
-  assert.deepEqual(d.elements.map((e) => e.zIndex), [1, 2, 3], "stacking order = array order, no gap left by the group");
+  assert.deepEqual(d.pages[0].elements.map((e) => e.id), ["t", "i", "r"]);
+  assert.deepEqual(d.pages[0].elements.map((e) => e.zIndex), [1, 2, 3], "stacking order = array order, no gap left by the group");
   assert.match(warnings.join(" | "), /1 elemen grup \(berisi 2 elemen/);
 });
 
-test("adapter: pageIndex picks the page that becomes the canvas", () => {
+test("adapter: every page is imported by default, in order, with its own size and unique ids", () => {
+  const doc = {
+    width: 500,
+    height: 500,
+    pages: [
+      { id: "a", children: [{ id: "x", type: "figure", subType: "rect", width: 5, height: 5 }] },
+      { id: "b", width: 640, height: 480, children: [{ id: "y", type: "figure", subType: "rect", width: 5, height: 5 }] },
+      // the same element id on another page: ids are unique across the document
+      { id: "c", children: [{ id: "x", type: "figure", subType: "rect", width: 5, height: 5 }] },
+    ],
+  };
+  const all = convertPolotnoToKusuka(doc);
+  assert.equal(all.document.pages.length, 3);
+  assert.deepEqual(all.document.pages.map((p) => p.id), ["a", "b", "c"]);
+  assert.deepEqual(all.document.pages.map((p) => [p.canvas.width, p.canvas.height]), [[500, 500], [640, 480], [500, 500]]);
+  const ids = all.document.pages.flatMap((p) => p.elements.map((e) => e.id));
+  assert.equal(new Set(ids).size, 3, "the repeated id was renamed");
+  assert.equal(ids[0], "x");
+  assert.equal(ids[1], "y");
+  assert.doesNotMatch(all.warnings.join(" "), /halaman/, "nothing is dropped, so nothing is reported");
+});
+
+test("adapter: pageIndex picks the one page that is imported", () => {
   const doc = {
     width: 500,
     height: 500,
@@ -448,9 +468,10 @@ test("adapter: pageIndex picks the page that becomes the canvas", () => {
     ],
   };
   const second = convertPolotnoToKusuka(doc, { pageIndex: 1 });
-  assert.deepEqual(second.document.elements.map((e) => e.id), ["y"]);
-  assert.deepEqual([second.document.canvas.width, second.document.canvas.height], [640, 480]);
-  assert.match(second.warnings.join(" "), /halaman 2/);
+  assert.deepEqual(second.document.pages[0].elements.map((e) => e.id), ["y"]);
+  assert.deepEqual([second.document.pages[0].canvas.width, second.document.pages[0].canvas.height], [640, 480]);
+  assert.equal(second.document.pages.length, 1, "only the page asked for");
+  assert.deepEqual(second.warnings, []);
 });
 
 test("adapter: Polotno text color — `fill` is the color; `color` only as a fallback; unusable -> black + warning", () => {
@@ -465,7 +486,7 @@ test("adapter: Polotno text color — `fill` is the color; `color` only as a fal
       { id: "g", type: "text", x: 0, y: 0, width: 100, text: "g", fill: "hsl(120, 100%, 50%)" },
     ])
   );
-  const fills = d.elements.map((e) => (e.type === "text" ? e.fill : null));
+  const fills = d.pages[0].elements.map((e) => (e.type === "text" ? e.fill : null));
   assert.deepEqual(fills, ["#ff0000", "#0000ff", "#00ff00", "#123456", "#000000", "#000000", "#00ff00"]);
   const colorWarnings = warnings.filter((w) => w.includes("warna"));
   assert.equal(colorWarnings.length, 1);
@@ -479,7 +500,7 @@ test("adapter: figure colors accept rgb/rgba/hsl/hex/names; an unreadable one co
       { id: "b", type: "figure", subType: "circle", width: 10, height: 10, fill: "radial-gradient(red, blue)" },
     ])
   );
-  const [a, b] = d.elements;
+  const [a, b] = d.pages[0].elements;
   assert.ok(a.type === "shape" && a.fill === "#ff0000" && a.stroke === "#0000ff");
   assert.ok(b.type === "shape" && b.fill === "#00a1ff", "Polotno's default figure fill");
   assert.equal(warnings.filter((w) => w.includes("warna")).length, 1);
@@ -494,7 +515,7 @@ test("adapter: (x, y) is the top-left corner for every type — pictures and sha
   ];
   const { document: d } = convertPolotnoToKusuka(polotnoBase(children));
   for (const src of children.filter((c) => c.type !== "text")) {
-    const el = d.elements.find((e) => e.id === src.id)!;
+    const el = d.pages[0].elements.find((e) => e.id === src.id)!;
     assert.deepEqual(
       [el.x, el.y, el.width, el.height, el.rotation],
       [src.x, src.y, src.width, src.height, src.rotation],
@@ -505,7 +526,7 @@ test("adapter: (x, y) is the top-left corner for every type — pictures and sha
   // Text: the box is 10px wider (import tolerance), but the text itself must
   // not move. Polotno's default alignment is "center", so the point at the
   // middle of the top edge of the box (turned by the rotation) must be unchanged.
-  const t = d.elements.find((e) => e.id === "t")! as TextElement;
+  const t = d.pages[0].elements.find((e) => e.id === "t")! as TextElement;
   assert.equal(t.widthTolerance, 10);
   assert.equal(t.width, 331);
   const middleTop = (x: number, y: number, w: number, deg: number) => {
@@ -529,7 +550,7 @@ test("adapter: image crop fractions survive both directions; invalid crops fall 
   const ok = convertPolotnoToKusuka(
     polotnoBase([{ id: "i", type: "image", x: 0, y: 0, width: 10, height: 10, src: "https://e/x.png", cropX: 0.1, cropY: 0.2, cropWidth: 0.5, cropHeight: 0.6 }])
   );
-  const img = ok.document.elements[0] as ImageElement;
+  const img = ok.document.pages[0].elements[0] as ImageElement;
   assert.deepEqual([img.cropX, img.cropY, img.cropWidth, img.cropHeight], [0.1, 0.2, 0.5, 0.6]);
   assert.deepEqual(ok.warnings, []);
   const out = convertKusukaToPolotno(ok.document).pages[0].children![0];
@@ -542,7 +563,7 @@ test("adapter: image crop fractions survive both directions; invalid crops fall 
   const bad = convertPolotnoToKusuka(
     polotnoBase([{ id: "i", type: "image", x: 0, y: 0, width: 10, height: 10, src: "https://e/x.png", cropX: 120, cropY: 0, cropWidth: 640, cropHeight: 480 }])
   );
-  const whole = bad.document.elements[0] as ImageElement;
+  const whole = bad.document.pages[0].elements[0] as ImageElement;
   assert.deepEqual([whole.cropX, whole.cropY, whole.cropWidth, whole.cropHeight], [0, 0, 1, 1]);
   assert.match(bad.warnings.join(" "), /crop yang tidak valid/);
 });
@@ -556,7 +577,7 @@ test("adapter: image edge cases — no src is skipped, blob: is flagged, hidden 
       { id: "d", type: "image", x: 0, y: 0, width: 10, height: 10, src: "data:image/png;base64,AAAA", opacity: 0.5 },
     ])
   );
-  assert.deepEqual(d.elements.map((e) => e.id), ["b", "d"]);
+  assert.deepEqual(d.pages[0].elements.map((e) => e.id), ["b", "d"]);
   const all = warnings.join(" | ");
   assert.match(all, /gambar tanpa sumber/);
   assert.match(all, /blob:/);
@@ -564,13 +585,9 @@ test("adapter: image edge cases — no src is skipped, blob: is flagged, hidden 
 });
 
 test("adapter: the editor's own image survives Kusuka -> Polotno -> Kusuka exactly", () => {
-  const doc: CanvasDocument = {
-    version: 2,
-    canvas: { width: 1200, height: 675, backgroundColor: "#101010" },
-    elements: [
-      { id: "i", type: "image", x: 12.5, y: 40, width: 333.25, height: 187.45, rotation: 17, zIndex: 1, src: "data:image/png;base64,AAAA", cropX: 0.1, cropY: 0, cropWidth: 0.8, cropHeight: 1, scaleX: 1, scaleY: 1 },
-    ] as CanvasElement[],
-  };
+  const doc: CanvasDocument = onePage({ width: 1200, height: 675, backgroundColor: "#101010" }, [
+    { id: "i", type: "image", x: 12.5, y: 40, width: 333.25, height: 187.45, rotation: 17, zIndex: 1, src: "data:image/png;base64,AAAA", cropX: 0.1, cropY: 0, cropWidth: 0.8, cropHeight: 1, scaleX: 1, scaleY: 1 },
+  ] as CanvasElement[]);
   const back = convertPolotnoToKusuka(convertKusukaToPolotno(doc));
   assert.deepEqual(back.warnings, []);
   assert.deepEqual(back.document, doc);

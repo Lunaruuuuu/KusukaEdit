@@ -17,9 +17,15 @@ export type TextFontStyle = "normal" | "bold" | "italic" | "bold italic";
  * Schema version written by exportToJSON().
  *   v1: circles were stored by their CENTER point (a quirk of Konva's Circle).
  *   v2: every element, circles included, is stored by its top-left corner.
- * Files with `version: 1` are migrated automatically on load.
+ *   v3: a document is a list of PAGES (`pages`), each with its own canvas and
+ *       elements; v1/v2 files had a single `canvas` + `elements`.
+ * Files with an older `version` are migrated automatically on load (a v1/v2
+ * file becomes a one-page document).
  */
-export const SCHEMA_VERSION = 2 as const;
+export const SCHEMA_VERSION = 3 as const;
+
+/** The last schema in which a document was ONE canvas (`canvas` + `elements`). */
+export const LAST_SINGLE_PAGE_SCHEMA = 2 as const;
 
 export const DEFAULT_FONT_FAMILY = "Inter, sans-serif";
 
@@ -108,7 +114,54 @@ export interface ImageElement extends BaseElement {
    * as an `svg` element instead of an `image`.
    */
   vector?: boolean;
+
+  // ---- Visual effects (all optional: absent = no effect) -------------------
+  // They are what Polotno calls blurRadius, borderSize / borderColor,
+  // shadowColor / shadowBlur / shadowOffsetX / shadowOffsetY / shadowOpacity and
+  // clipSrc. Every length is in design pixels.
+
+  /** Gaussian-style blur of the whole picture (Konva.Filters.Blur). 0 / absent = sharp. */
+  blurRadius?: number;
+  /** Border colour (#rrggbb), drawn over the picture along the box or the mask outline. */
+  stroke?: string;
+  /** Border thickness; 0 / absent = no border. */
+  strokeWidth?: number;
+  /** Drop-shadow colour (#rrggbb). Absent = no shadow. */
+  shadowColor?: string;
+  shadowBlur?: number;
+  shadowOffsetX?: number;
+  shadowOffsetY?: number;
+  /** 0..1, multiplied into the shadow colour. Absent = 1. */
+  shadowOpacity?: number;
+  /**
+   * Cuts the picture to a shape that is fitted into the element's box: a circle
+   * (an ellipse when the box is not square) or a triangle (apex at the top
+   * centre). Absent = the plain rectangle.
+   */
+  maskShape?: MaskShape;
+  /**
+   * Rounded corners of the picture's box, in design pixels (Polotno: cornerRadius).
+   * Ignored while a `maskShape` is set (a circle or triangle has no corners to
+   * round). Absent / 0 = square corners.
+   */
+  cornerRadius?: number;
+
+  // ---- Colour filter (all optional: absent = the picture as it is) ---------
+  /** -100..100, 0 = unchanged. Added to every channel (Konva's Brighten; Polotno: brightness x100). */
+  brightness?: number;
+  /** -100..100, 0 = unchanged. Stretches the channels around mid-grey. */
+  contrast?: number;
+  /** -100..100, 0 = unchanged, -100 = black and white, +100 = twice as colourful. */
+  saturation?: number;
+  /** A ready-made look, applied together with the three sliders above. Absent = none. */
+  filterPreset?: FilterPreset;
 }
+
+/** The masks a picture can be cut to. */
+export type MaskShape = "circle" | "triangle";
+
+/** The filter presets of the image panel (see lib/imageFilters.ts for what each one does). */
+export type FilterPreset = "grayscale" | "sepia" | "vivid" | "fade" | "warm" | "cool" | "dramatic";
 
 export type CanvasElement = TextElement | ShapeElement | ImageElement;
 
@@ -118,10 +171,21 @@ export interface CanvasMeta {
   backgroundColor: string;
 }
 
-// The full exported document. `version` lets loadFromJSON migrate or reject
-// files written by a different schema version.
-export interface CanvasDocument {
-  version: typeof SCHEMA_VERSION;
+/**
+ * One page of the document: its own working area (size + background) and the
+ * elements drawn on it. Pages are independent — an element belongs to exactly
+ * one page, and a page may be a different size from its neighbours.
+ */
+export interface Page {
+  id: string;
   canvas: CanvasMeta;
   elements: CanvasElement[];
+}
+
+// The full exported document. `version` lets loadFromJSON migrate or reject
+// files written by a different schema version. A document always has at
+// least one page.
+export interface CanvasDocument {
+  version: typeof SCHEMA_VERSION;
+  pages: Page[];
 }

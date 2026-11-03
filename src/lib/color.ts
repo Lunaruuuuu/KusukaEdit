@@ -103,6 +103,22 @@ export function parseColor(value: unknown): string | null {
   return NAMED_COLORS[v] ?? null;
 }
 
+/**
+ * The alpha (0..1) of a color: rgba()/hsla() and #rrggbbaa carry one, anything
+ * else is opaque (1), and "transparent" is 0. parseColor() drops alpha on
+ * purpose (the color inputs only know #rrggbb); this is for the places that
+ * keep it separately, such as a shadow's opacity.
+ */
+export function colorAlpha(value: unknown): number {
+  if (typeof value !== "string") return 1;
+  const v = value.trim().toLowerCase();
+  if (v === "transparent") return 0;
+  if (/^#[0-9a-f]{8}$/.test(v)) return parseInt(v.slice(7), 16) / 255;
+  const m = v.match(/^(?:rgba|hsla)\(.*,\s*(\d*\.?\d+)\s*\)$/);
+  if (m) return Math.min(1, Math.max(0, parseFloat(m[1])));
+  return 1;
+}
+
 /** True when a file actually specified a color (so an unparsable one is worth a warning). */
 export function isColorSpecified(value: unknown): boolean {
   return typeof value === "string" && value.trim() !== "";

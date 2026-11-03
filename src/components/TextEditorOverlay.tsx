@@ -3,6 +3,7 @@
 import React, { useLayoutEffect, useRef } from "react";
 import type { TextElement } from "@/types/editor";
 import { useEditorStore } from "@/store/useEditorStore";
+import { selectElementById } from "@/store/selectors";
 
 // ---------------------------------------------------------------------------
 // In-place text editing.
@@ -22,7 +23,7 @@ import { useEditorStore } from "@/store/useEditorStore";
 
 export default function TextEditorOverlay() {
   const editingId = useEditorStore((s) => s.editingId);
-  const element = useEditorStore((s) => s.elements.find((e) => e.id === s.editingId));
+  const element = useEditorStore((s) => selectElementById(s, s.editingId));
 
   if (!editingId || !element || element.type !== "text") return null;
   // `key` remounts the editor (fresh focus + select-all) for every edit session.

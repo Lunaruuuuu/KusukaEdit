@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, run } from "./harness";
+import { E, C, onePage, mkPage } from "./helpers";
 import { parseColor, normalizeColor, toInputColor } from "@/lib/color";
 import {
   detectFormat,
@@ -50,16 +51,18 @@ test("fonts: the five built-in stacks round-trip exactly", () => {
 test("detectFormat", () => {
   assert.equal(detectFormat({ pages: [] }), "polotno");
   assert.equal(detectFormat({ version: 2, canvas: {}, elements: [] }), "kusuka");
+  assert.equal(detectFormat({ version: 3, pages: [{ id: "a", canvas: {}, elements: [] }] }), "kusuka");
+  assert.equal(detectFormat({ version: 3, pages: [] }), "kusuka");
+  assert.equal(detectFormat({ schemaVersion: 4, pages: [{ id: "a", children: [] }] }), "polotno");
   assert.equal(detectFormat({ foo: 1 }), "unknown");
   assert.equal(detectFormat(null), "unknown");
   assert.equal(detectFormat([]), "unknown");
 });
 
 // ------------------------------ sample documents --------------------------
-const nativeDoc: CanvasDocument = {
-  version: 2,
-  canvas: { width: 900, height: 600, backgroundColor: "#0f172a" },
-  elements: [
+const nativeDoc: CanvasDocument = onePage(
+  { width: 900, height: 600, backgroundColor: "#0f172a" },
+  [
     {
       id: "t1", type: "text", x: 40, y: 50, width: 420, height: 60, rotation: 0, zIndex: 5,
       text: "Halo\nDunia", fontSize: 48, fontFamily: "Georgia, serif", fill: "#ffffff",
@@ -77,7 +80,14 @@ const nativeDoc: CanvasDocument = {
       id: "i1", type: "image", x: 10, y: 10, width: 50, height: 50, rotation: 0, zIndex: 1, src: "data:image/png;base64,AAAA",
       cropX: 0, cropY: 0, cropWidth: 1, cropHeight: 1, scaleX: 1, scaleY: 1,
     },
-  ],
+  ]
+);
+
+/** The same design as `nativeDoc`, in the v2 file layout (one canvas + elements). */
+const nativeDocV2 = {
+  version: 2,
+  canvas: nativeDoc.pages[0].canvas,
+  elements: nativeDoc.pages[0].elements,
 };
 
 test("Kusuka -> Polotno: structure, z-order, property names", () => {
@@ -113,13 +123,13 @@ test("Kusuka -> Polotno: structure, z-order, property names", () => {
 test("Kusuka -> Polotno -> Kusuka is lossless (z-order kept, zIndex renumbered 1..n)", () => {
   const back = convertPolotnoToKusuka(convertKusukaToPolotno(nativeDoc));
   assert.deepEqual(back.warnings.filter((w) => !w.includes("gambar")), []);
-  const expectedOrder = [...nativeDoc.elements].sort((a, b) => a.zIndex - b.zIndex);
-  assert.equal(back.document.elements.length, expectedOrder.length);
-  back.document.elements.forEach((el, i) => {
+  const expectedOrder = [...nativeDoc.pages[0].elements].sort((a, b) => a.zIndex - b.zIndex);
+  assert.equal(back.document.pages[0].elements.length, expectedOrder.length);
+  back.document.pages[0].elements.forEach((el, i) => {
     const orig = expectedOrder[i];
     assert.deepEqual(el, { ...orig, zIndex: i + 1 }, `element ${orig.id}`);
   });
-  assert.deepEqual(back.document.canvas, nativeDoc.canvas);
+  assert.deepEqual(back.document.pages[0].canvas, nativeDoc.pages[0].canvas);
 });
 
 const polotnoDoc = {
@@ -153,9 +163,13 @@ const polotnoDoc = {
 };
 
 test("Polotno -> Kusuka: canvas, order, circle origin, colors, fonts", () => {
-  const { document: d, warnings } = convertPolotnoToKusuka(polotnoDoc);
+  const { document: doc, warnings } = convertPolotnoToKusuka(polotnoDoc);
+  // EVERY page is imported now (the file has two); the first one is checked here
+  assert.equal(doc.pages.length, 2);
+  assert.deepEqual(doc.pages[1].elements, []);
+  const d = { canvas: doc.pages[0].canvas, elements: doc.pages[0].elements, version: doc.version };
   assert.deepEqual(d.canvas, { width: 800, height: 500, backgroundColor: "#ffffff" });
-  assert.equal(d.version, 2);
+  assert.equal(d.version, 3);
   // hidden "g" and star "d" are dropped (the svg "e" is imported since v5);
   // zIndex follows the kept order
   assert.deepEqual(d.elements.map((e) => e.id), ["a", "b", "c", "e", "f", "h"]);
@@ -196,7 +210,7 @@ test("Polotno -> Kusuka: canvas, order, circle origin, colors, fonts", () => {
   assert.equal(rect.cornerRadius, 0);
 
   const joined = warnings.join(" | ");
-  assert.match(joined, /2 halaman/);
+  assert.doesNotMatch(joined, /hanya halaman/, "no page is dropped any more");
   assert.match(joined, /bentuk "star"/);
   assert.doesNotMatch(joined, /svg/i, "svg is imported now, not skipped");
   assert.doesNotMatch(joined, /gambar/, "an https picture is now imported, not skipped");
@@ -221,13 +235,13 @@ test("Polotno -> Kusuka -> Polotno keeps every mapped property", () => {
 
 test("Polotno: empty document, background image, doc-level size fallback", () => {
   const r = convertPolotnoToKusuka({ pages: [] });
-  assert.equal(r.document.elements.length, 0);
-  assert.deepEqual(r.document.canvas, { width: 1080, height: 1080, backgroundColor: "#ffffff" });
+  assert.equal(r.document.pages[0].elements.length, 0);
+  assert.deepEqual(r.document.pages[0].canvas, { width: 1080, height: 1080, backgroundColor: "#ffffff" });
   const r2 = convertPolotnoToKusuka({ width: 300, height: 200, pages: [{ background: "https://x/y.png", children: [] }] });
-  assert.equal(r2.document.canvas.backgroundColor, "#ffffff");
-  assert.match(r2.warnings.join(" "), /Latar halaman/);
+  assert.equal(r2.document.pages[0].canvas.backgroundColor, "#ffffff");
+  assert.match(r2.warnings.join(" "), /latar gambar\/gradien/);
   const r3 = convertPolotnoToKusuka({ width: 300, height: 200, pages: [{ width: 640, height: "auto", children: [] }] });
-  assert.deepEqual([r3.document.canvas.width, r3.document.canvas.height], [640, 200]);
+  assert.deepEqual([r3.document.pages[0].canvas.width, r3.document.pages[0].canvas.height], [640, 200]);
 });
 
 // ------------------------------ native: migration -------------------------
@@ -248,7 +262,7 @@ test("native v1 circle (x,y = centre) migrates to v2 with the same visual centre
     const r = parseDocument(v1);
     assert.ok(r.ok);
     if (!r.ok) return;
-    const el = r.document.elements[0];
+    const el = r.document.pages[0].elements[0];
     const [cx, cy] = centerOf(el);
     assert.ok(Math.abs(cx - 300) < 1e-9 && Math.abs(cy - 200) < 1e-9, `rotation ${rotation}: centre (${cx}, ${cy})`);
     assert.equal(el.width, 100);
@@ -266,13 +280,13 @@ test("native v1 file without new fields: legacy defaults keep the old look", () 
   });
   assert.ok(r.ok);
   if (!r.ok) return;
-  const [t, rect] = r.document.elements;
+  const [t, rect] = r.document.pages[0].elements;
   assert.ok(t.type === "text" && t.lineHeight === 1 && t.fontStyle === "normal" && t.fill === "#000000");
   assert.ok(rect.type === "shape" && rect.cornerRadius === 4 && rect.fill === "#ff0000");
-  assert.equal(r.document.canvas.backgroundColor, "#ffffff");
+  assert.equal(r.document.pages[0].canvas.backgroundColor, "#ffffff");
 });
 
-test("native v2 document passes through unchanged (idempotent)", () => {
+test("native v3 document passes through unchanged (idempotent)", () => {
   const r = parseDocument(JSON.parse(JSON.stringify(nativeDoc)));
   assert.ok(r.ok);
   if (!r.ok) return;
@@ -282,13 +296,25 @@ test("native v2 document passes through unchanged (idempotent)", () => {
   assert.ok(r2.ok && JSON.stringify(r2.document) === JSON.stringify(r.document));
 });
 
+test("native v2 document (one canvas + elements) becomes a one-page v3 document, silently", () => {
+  const r = parseDocument(JSON.parse(JSON.stringify(nativeDocV2)));
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.format, "kusuka");
+  assert.equal(r.document.version, 3);
+  assert.equal(r.document.pages.length, 1);
+  assert.deepEqual(r.document.pages[0].canvas, nativeDoc.pages[0].canvas);
+  assert.deepEqual(r.document.pages[0].elements, nativeDoc.pages[0].elements);
+  assert.deepEqual(r.warnings, [], "v2 -> v3 loses nothing, so there is nothing to warn about");
+});
+
 test("parseDocument: errors and recovery", () => {
   const bad = parseDocument("{not json");
   assert.ok(!bad.ok && /bukan JSON/.test(bad.error));
   const unknown = parseDocument({ hello: "world" });
   assert.ok(!unknown.ok && /tidak dikenali/.test(unknown.error));
-  const future = parseDocument({ version: 3, canvas: {}, elements: [] });
-  assert.ok(!future.ok && /v3/.test(future.error));
+  const future = parseDocument({ version: 4, pages: [] });
+  assert.ok(!future.ok && /v4/.test(future.error));
   const dirty = parseDocument({
     version: 2,
     canvas: { width: -5, height: "abc" },
@@ -296,9 +322,9 @@ test("parseDocument: errors and recovery", () => {
   });
   assert.ok(dirty.ok);
   if (!dirty.ok) return;
-  assert.deepEqual([dirty.document.canvas.width, dirty.document.canvas.height], [1, 600]);
-  assert.equal(dirty.document.elements.length, 2);
-  assert.notEqual(dirty.document.elements[0].id, dirty.document.elements[1].id, "duplicate ids are made unique");
+  assert.deepEqual([dirty.document.pages[0].canvas.width, dirty.document.pages[0].canvas.height], [1, 600]);
+  assert.equal(dirty.document.pages[0].elements.length, 2);
+  assert.notEqual(dirty.document.pages[0].elements[0].id, dirty.document.pages[0].elements[1].id, "duplicate ids are made unique");
   assert.match(dirty.warnings.join(" "), /4 elemen/);
 });
 
@@ -310,7 +336,7 @@ test("store: new shapes are placed by their top-left corner, text has lineHeight
   S().addShapeElement("circle");
   S().addShapeElement("rect");
   S().addTextElement("title");
-  const [circle, rect, text] = S().elements;
+  const [circle, rect, text] = E();
   assert.ok(circle.type === "shape" && rect.type === "shape" && text.type === "text");
   assert.deepEqual(centerOf(circle), [450, 300], "circle centred on the 900x600 canvas");
   assert.deepEqual(centerOf(rect), [450, 300], "rect centred on the 900x600 canvas");
@@ -324,39 +350,39 @@ test("store: Ctrl+C / Ctrl+V — new id, +20/+20 offset, top z-order, one histor
   S().reset();
   S().addShapeElement("rect");
   S().addTextElement("subtitle");
-  const rect = S().elements[0];
+  const rect = E()[0];
   S().setSelectedId(rect.id);
   assert.equal(S().copySelected(), true);
   assert.equal(S().clipboard?.id, rect.id);
 
   const pastBefore = S().past.length;
-  const countBefore = S().elements.length;
+  const countBefore = E().length;
   assert.equal(S().pasteClipboard(), true);
-  assert.equal(S().elements.length, countBefore + 1);
+  assert.equal(E().length, countBefore + 1);
   assert.equal(S().past.length, pastBefore + 1, "paste records exactly one undo step");
 
-  const pasted = S().elements[S().elements.length - 1];
+  const pasted = E()[E().length - 1];
   assert.notEqual(pasted.id, rect.id);
   assert.equal(pasted.x, rect.x + 20);
   assert.equal(pasted.y, rect.y + 20);
-  assert.equal(pasted.zIndex, Math.max(...S().elements.map((e) => e.zIndex)));
+  assert.equal(pasted.zIndex, Math.max(...E().map((e) => e.zIndex)));
   assert.ok(pasted.zIndex > rect.zIndex);
   assert.equal(S().selectedId, pasted.id);
   assert.deepEqual({ ...pasted, id: "", x: 0, y: 0, zIndex: 0 }, { ...rect, id: "", x: 0, y: 0, zIndex: 0 }, "everything else is copied");
   // the original is untouched
-  assert.equal(S().elements.find((e) => e.id === rect.id)!.x, rect.x);
+  assert.equal(E().find((e) => e.id === rect.id)!.x, rect.x);
 
   // pasting again cascades instead of stacking
   S().pasteClipboard();
-  const second = S().elements[S().elements.length - 1];
+  const second = E()[E().length - 1];
   assert.equal(second.x, rect.x + 40);
   assert.equal(second.y, rect.y + 40);
 
   // undo removes only the last paste
   S().undo();
-  assert.equal(S().elements.length, countBefore + 1);
+  assert.equal(E().length, countBefore + 1);
   S().undo();
-  assert.equal(S().elements.length, countBefore);
+  assert.equal(E().length, countBefore);
 });
 
 test("store: copy/paste edge cases", () => {
@@ -371,55 +397,55 @@ test("store: copy/paste edge cases", () => {
   assert.equal(S().copySelected(), false);
   assert.equal(S().clipboard, null);
   // clipboard survives deleting the original and loading another file
-  S().setSelectedId(S().elements[0].id);
+  S().setSelectedId(E()[0].id);
   S().copySelected();
   S().removeSelected();
-  assert.equal(S().elements.length, 0);
+  assert.equal(E().length, 0);
   assert.equal(S().pasteClipboard(), true);
-  assert.equal(S().elements.length, 1);
+  assert.equal(E().length, 1);
 });
 
 test("store: clipboard is a snapshot — editing the original afterwards does not change it", () => {
   S().reset();
   S().addShapeElement("rect");
-  const id = S().elements[0].id;
+  const id = E()[0].id;
   S().setSelectedId(id);
   S().copySelected();
   S().updateElement(id, { fill: "#000000" });
   S().pasteClipboard();
-  const pasted = S().elements[1];
+  const pasted = E()[1];
   assert.ok(pasted.type === "shape" && pasted.fill === "#6366f1");
 });
 
 test("store: loadFromJSON accepts string/object, both formats, and is undoable", () => {
   S().reset();
   S().addTextElement("title");
-  const before = JSON.stringify(S().elements);
+  const before = JSON.stringify(E());
 
   const r1 = S().loadFromJSON(JSON.stringify(nativeDoc));
   assert.ok(r1.ok && r1.format === "kusuka");
-  assert.equal(S().elements.length, 4);
-  assert.equal(S().canvas.backgroundColor, "#0f172a");
+  assert.equal(E().length, 4);
+  assert.equal(C().backgroundColor, "#0f172a");
 
   const r2 = S().loadFromJSON(polotnoDoc);
   assert.ok(r2.ok && r2.format === "polotno");
-  assert.equal(S().elements.length, 6);
+  assert.equal(E().length, 6);
   assert.ok(r2.ok && r2.warnings.length > 0);
 
   S().undo();
-  assert.equal(S().elements.length, 4);
+  assert.equal(E().length, 4);
   S().undo();
-  assert.equal(JSON.stringify(S().elements), before);
+  assert.equal(JSON.stringify(E()), before);
 });
 
 test("store: failed load changes nothing and records no history", () => {
   S().reset();
   S().addTextElement("title");
-  const snapshot = JSON.stringify({ c: S().canvas, e: S().elements });
+  const snapshot = JSON.stringify({ c: C(), e: E() });
   const past = S().past.length;
   const r = S().loadFromJSON("{oops");
   assert.ok(!r.ok);
-  assert.equal(JSON.stringify({ c: S().canvas, e: S().elements }), snapshot);
+  assert.equal(JSON.stringify({ c: C(), e: E() }), snapshot);
   assert.equal(S().past.length, past);
 });
 
@@ -428,57 +454,57 @@ test("store: export -> clear -> import reproduces the canvas exactly (both forma
     S().reset();
     S().loadFromJSON(nativeDoc);
     S().addShapeElement("circle");
-    S().updateElement(S().elements[0].id, { x: 123.456, rotation: 12.5 });
+    S().updateElement(E()[0].id, { x: 123.456, rotation: 12.5 });
 
     // Native keeps zIndex values as they are; Polotno has no zIndex (array
     // order is the stacking order), so it comes back renumbered 1..n.
-    const stack = [...S().elements].sort((a, b) => a.zIndex - b.zIndex);
+    const stack = [...E()].sort((a, b) => a.zIndex - b.zIndex);
     const expected = format === "kusuka" ? stack : stack.map((e, i) => ({ ...e, zIndex: i + 1 }));
-    const expectedCanvas = { ...S().canvas };
+    const expectedCanvas = { ...C() };
 
     const { json: file, warnings } = await S().exportToJSON(format);
     assert.deepEqual(warnings, []);
     assert.equal(detectFormat(JSON.parse(file)), format);
 
     S().reset();
-    assert.equal(S().elements.length, 0);
+    assert.equal(E().length, 0);
     const r = S().loadFromJSON(file);
     assert.ok(r.ok && r.format === format);
-    assert.deepEqual(S().canvas, expectedCanvas, `${format}: canvas`);
-    assert.deepEqual([...S().elements].sort((a, b) => a.zIndex - b.zIndex), expected, `${format}: elements`);
+    assert.deepEqual(C(), expectedCanvas, `${format}: canvas`);
+    assert.deepEqual([...E()].sort((a, b) => a.zIndex - b.zIndex), expected, `${format}: elements`);
   }
 });
 
 test("store: syncMeasuredHeight updates height silently (no undo step)", () => {
   S().reset();
   S().addTextElement("paragraph");
-  const id = S().elements[0].id;
+  const id = E()[0].id;
   const past = S().past.length;
   S().syncMeasuredHeight(id, 57);
-  assert.equal(S().elements[0].height, 57);
+  assert.equal(E()[0].height, 57);
   assert.equal(S().past.length, past);
-  const ref = S().elements;
+  const ref = E();
   S().syncMeasuredHeight(id, 57.2);
-  assert.equal(S().elements, ref, "within 0.5px -> state object untouched");
+  assert.equal(E(), ref, "within 0.5px -> state object untouched");
   S().syncMeasuredHeight("missing", 10);
-  assert.equal(S().elements, ref);
+  assert.equal(E(), ref);
 });
 
 test("store: editingId is cleared by remove / undo / load / reset", () => {
   S().reset();
   S().addTextElement("title");
-  const id = S().elements[0].id;
+  const id = E()[0].id;
   S().setEditingId(id);
   S().removeElement(id);
   assert.equal(S().editingId, null);
 
   S().addTextElement("title");
-  S().setEditingId(S().elements[0].id);
+  S().setEditingId(E()[0].id);
   S().undo();
   assert.equal(S().editingId, null);
 
   S().addTextElement("title");
-  S().setEditingId(S().elements[0].id);
+  S().setEditingId(E()[0].id);
   S().loadFromJSON(nativeDoc);
   assert.equal(S().editingId, null);
 

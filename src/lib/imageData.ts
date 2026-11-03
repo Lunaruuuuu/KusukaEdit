@@ -9,7 +9,7 @@
 // keeps using the cheap blob URL; only the exported copy is converted.
 // ---------------------------------------------------------------------------
 
-import type { CanvasDocument, CanvasElement } from "@/types/editor";
+import type { CanvasDocument, CanvasElement, Page } from "@/types/editor";
 import { isObjectUrl } from "@/lib/objectUrls";
 
 /** base64 of binary data, in chunks so large pictures don't overflow the call stack. */
@@ -45,10 +45,13 @@ export async function embedObjectUrls(doc: CanvasDocument): Promise<EmbedResult>
   const warnings: string[] = [];
   const converted = new Map<string, string | null>();
 
+  // Every picture of every page.
   const urls = new Set<string>();
-  doc.elements.forEach((el) => {
-    if (el.type === "image" && isObjectUrl(el.src)) urls.add(el.src);
-  });
+  doc.pages.forEach((page) =>
+    page.elements.forEach((el) => {
+      if (el.type === "image" && isObjectUrl(el.src)) urls.add(el.src);
+    })
+  );
 
   for (const url of urls) {
     try {
@@ -59,18 +62,21 @@ export async function embedObjectUrls(doc: CanvasDocument): Promise<EmbedResult>
   }
 
   let unreadable = 0;
-  const elements: CanvasElement[] = doc.elements.map((el) => {
-    if (el.type !== "image" || !isObjectUrl(el.src)) return el;
-    const dataUrl = converted.get(el.src);
-    if (dataUrl) return { ...el, src: dataUrl };
-    unreadable++;
-    return el;
-  });
+  const pages: Page[] = doc.pages.map((page) => ({
+    ...page,
+    elements: page.elements.map((el): CanvasElement => {
+      if (el.type !== "image" || !isObjectUrl(el.src)) return el;
+      const dataUrl = converted.get(el.src);
+      if (dataUrl) return { ...el, src: dataUrl };
+      unreadable++;
+      return el;
+    }),
+  }));
 
   if (unreadable > 0) {
     warnings.push(
       `${unreadable} gambar tidak bisa dibaca lagi dan tetap memakai URL sementara; gambar itu tidak akan tampil saat file ini dibuka kembali.`
     );
   }
-  return { document: { ...doc, elements }, warnings };
+  return { document: { ...doc, pages }, warnings };
 }

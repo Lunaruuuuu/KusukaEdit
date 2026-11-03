@@ -2,9 +2,11 @@
 
 import React, { useRef, useState } from "react";
 import { useEditorStore } from "@/store/useEditorStore";
-import { TextAlign } from "@/types/editor";
+import { selectElementById } from "@/store/selectors";
+import type { CanvasElement, ImageElement, ShapeElement, TextAlign, TextElement } from "@/types/editor";
 import { toInputColor } from "@/lib/color";
 import { prepareImageFile } from "@/lib/imageUpload";
+import { isWholePicture } from "@/lib/crop";
 
 const FONT_FAMILIES = [
   "Inter, sans-serif",
@@ -14,21 +16,131 @@ const FONT_FAMILIES = [
   "Verdana, sans-serif",
 ];
 
-export default function ContextualToolbar() {
-  const elements = useEditorStore((s) => s.elements);
-  const selectedId = useEditorStore((s) => s.selectedId);
+// ---------------------------------------------------------------------------
+// The bar above the canvas. It follows the selection, in the order Polotno
+// uses: what is specific to the element first (text, shape, picture), then the
+// stacking buttons, then delete on the far right. Each group is a labelled
+// block with a divider between them, so the bar reads left to right and stays
+// tidy when it wraps on a narrow window.
+// ---------------------------------------------------------------------------
+
+interface Props {
+  /** Whether the "Filter & Efek" panel under this bar is open. */
+  stylePanelOpen: boolean;
+  onToggleStylePanel: () => void;
+}
+
+function Group({ label, children, grow }: { label?: string; children: React.ReactNode; grow?: boolean }) {
+  return (
+    <div className={`toolbar__group${grow ? " toolbar__group--grow" : ""}`} role="group" aria-label={label}>
+      {label && <span className="toolbar__label">{label}</span>}
+      <div className="toolbar__controls">{children}</div>
+    </div>
+  );
+}
+
+function TextControls({ el }: { el: TextElement }) {
   const updateElement = useEditorStore((s) => s.updateElement);
-  const reorderElement = useEditorStore((s) => s.reorderElement);
-  const removeElement = useEditorStore((s) => s.removeElement);
+  return (
+    <>
+      <Group label="Teks">
+        <input
+          type="color"
+          aria-label="Warna teks"
+          title="Warna teks"
+          value={toInputColor(el.fill)}
+          onChange={(e) => updateElement(el.id, { fill: e.target.value })}
+        />
+        <select
+          aria-label="Font"
+          title="Font"
+          value={el.fontFamily}
+          onChange={(e) => updateElement(el.id, { fontFamily: e.target.value })}
+        >
+          {FONT_FAMILIES.map((f) => (
+            <option key={f} value={f}>
+              {f.split(",")[0].replace(/'/g, "")}
+            </option>
+          ))}
+        </select>
+        <input
+          type="number"
+          className="input-narrow"
+          aria-label="Ukuran font"
+          title="Ukuran font"
+          min={8}
+          max={200}
+          value={el.fontSize}
+          onChange={(e) => updateElement(el.id, { fontSize: Number(e.target.value) || 1 })}
+        />
+      </Group>
+      <Group label="Perataan">
+        <div className="segmented">
+          {(["left", "center", "right"] as TextAlign[]).map((a) => (
+            <button
+              key={a}
+              className={el.align === a ? "active" : ""}
+              aria-pressed={el.align === a}
+              onClick={() => updateElement(el.id, { align: a })}
+            >
+              {a === "left" ? "Kiri" : a === "center" ? "Tengah" : "Kanan"}
+            </button>
+          ))}
+        </div>
+      </Group>
+    </>
+  );
+}
+
+function ShapeControls({ el }: { el: ShapeElement }) {
+  const updateElement = useEditorStore((s) => s.updateElement);
+  return (
+    <Group label="Bentuk">
+      <label className="inline-field" title="Warna isi">
+        <span>Isi</span>
+        <input
+          type="color"
+          value={toInputColor(el.fill)}
+          onChange={(e) => updateElement(el.id, { fill: e.target.value })}
+        />
+      </label>
+      <label className="inline-field" title="Warna garis">
+        <span>Garis</span>
+        <input
+          type="color"
+          value={toInputColor(el.stroke)}
+          onChange={(e) => updateElement(el.id, { stroke: e.target.value })}
+        />
+      </label>
+      <label className="inline-field" title="Tebal garis">
+        <span>Tebal</span>
+        <input
+          type="number"
+          className="input-narrow"
+          min={0}
+          max={40}
+          value={el.strokeWidth}
+          onChange={(e) => updateElement(el.id, { strokeWidth: Number(e.target.value) || 0 })}
+        />
+      </label>
+    </Group>
+  );
+}
+
+function ImageControls({
+  el,
+  stylePanelOpen,
+  onToggleStylePanel,
+}: { el: ImageElement } & Props) {
+  const croppingId = useEditorStore((s) => s.croppingId);
+  const setCroppingId = useEditorStore((s) => s.setCroppingId);
+  const resetImageCrop = useEditorStore((s) => s.resetImageCrop);
   const replaceImageSource = useEditorStore((s) => s.replaceImageSource);
 
-  // Hooks must run before the early return below.
   const replaceInputRef = useRef<HTMLInputElement | null>(null);
   const replaceTargetRef = useRef<string | null>(null);
   const [replaceBusy, setReplaceBusy] = useState(false);
   const [replaceError, setReplaceError] = useState<string | null>(null);
-
-  const selected = elements.find((e) => e.id === selectedId);
 
   async function handleReplaceFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -50,149 +162,116 @@ export default function ContextualToolbar() {
     }
   }
 
+  const cropping = croppingId === el.id;
+  return (
+    <>
+      <Group label="Pangkas">
+        <div className="segmented">
+          <button
+            className={cropping ? "active" : ""}
+            aria-pressed={cropping}
+            onClick={() => setCroppingId(cropping ? null : el.id)}
+            title="Pangkas gambar: seret siku atau tepi bingkai (atau klik dua kali gambarnya)"
+            data-toolbar-action="crop"
+          >
+            {cropping ? "Selesai" : "Pangkas"}
+          </button>
+          <button
+            onClick={() => resetImageCrop(el.id)}
+            disabled={isWholePicture(el)}
+            title="Tampilkan lagi seluruh gambar"
+            data-toolbar-action="reset-crop"
+          >
+            Reset
+          </button>
+        </div>
+      </Group>
+      <Group label="Gambar">
+        <button
+          className="toolbar-button"
+          onClick={() => {
+            setReplaceError(null);
+            replaceTargetRef.current = el.id;
+            replaceInputRef.current?.click();
+          }}
+          disabled={replaceBusy}
+          title="Ganti isi gambar; posisi dan lebar tetap, tinggi mengikuti rasio gambar baru"
+        >
+          {replaceBusy ? "Memuat…" : "Ganti"}
+        </button>
+        <button
+          className={`toolbar-button${stylePanelOpen ? " toolbar-button--on" : ""}`}
+          aria-pressed={stylePanelOpen}
+          onClick={onToggleStylePanel}
+          title="Buka panel filter (kecerahan, kontras, saturasi, preset) dan efek (blur, sudut membulat, bayangan)"
+          data-toolbar-action="style-panel"
+        >
+          ✦ Filter &amp; Efek
+        </button>
+        <input
+          ref={replaceInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={handleReplaceFile}
+        />
+        {replaceError && <span className="error-note error-note--inline">{replaceError}</span>}
+      </Group>
+    </>
+  );
+}
+
+function LayerControls({ el }: { el: CanvasElement }) {
+  const reorderElement = useEditorStore((s) => s.reorderElement);
+  return (
+    <Group label={`Susun (z ${el.zIndex})`}>
+      <div className="segmented">
+        <button onClick={() => reorderElement(el.id, "back")} title="Kirim ke paling belakang">
+          ⇤ Belakang
+        </button>
+        <button onClick={() => reorderElement(el.id, "backward")} title="Turunkan satu lapis">
+          ← Turun
+        </button>
+        <button onClick={() => reorderElement(el.id, "forward")} title="Naikkan satu lapis">
+          Naik →
+        </button>
+        <button onClick={() => reorderElement(el.id, "front")} title="Bawa ke paling depan">
+          Depan ⇥
+        </button>
+      </div>
+    </Group>
+  );
+}
+
+export default function ContextualToolbar({ stylePanelOpen, onToggleStylePanel }: Props) {
+  const selected = useEditorStore((s) => selectElementById(s, s.selectedId));
+  const removeElement = useEditorStore((s) => s.removeElement);
+
   if (!selected) {
     return (
-      <div className="panel toolbar toolbar--empty">
+      <div className="panel toolbar toolbar--empty" data-toolbar="empty">
         Pilih sebuah elemen di kanvas untuk melihat kontrolnya.
       </div>
     );
   }
 
   return (
-    <div className="panel toolbar">
-      {selected.type === "text" && (
-        <>
-          <label className="field">
-            <span>Warna</span>
-            <input
-              type="color"
-              value={toInputColor(selected.fill)}
-              onChange={(e) => updateElement(selected.id, { fill: e.target.value })}
-            />
-          </label>
-
-          <label className="field">
-            <span>Ukuran Font</span>
-            <input
-              type="number"
-              min={8}
-              max={200}
-              value={selected.fontSize}
-              onChange={(e) =>
-                updateElement(selected.id, { fontSize: Number(e.target.value) || 1 })
-              }
-            />
-          </label>
-
-          <label className="field">
-            <span>Font</span>
-            <select
-              value={selected.fontFamily}
-              onChange={(e) => updateElement(selected.id, { fontFamily: e.target.value })}
-            >
-              {FONT_FAMILIES.map((f) => (
-                <option key={f} value={f}>
-                  {f.split(",")[0].replace(/'/g, "")}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="field">
-            <span>Perataan</span>
-            <div className="segmented">
-              {(["left", "center", "right"] as TextAlign[]).map((a) => (
-                <button
-                  key={a}
-                  className={selected.align === a ? "active" : ""}
-                  onClick={() => updateElement(selected.id, { align: a })}
-                >
-                  {a === "left" ? "Kiri" : a === "center" ? "Tengah" : "Kanan"}
-                </button>
-              ))}
-            </div>
-          </label>
-        </>
-      )}
-
-      {selected.type === "shape" && (
-        <>
-          <label className="field">
-            <span>Warna Isi</span>
-            <input
-              type="color"
-              value={toInputColor(selected.fill)}
-              onChange={(e) => updateElement(selected.id, { fill: e.target.value })}
-            />
-          </label>
-
-          <label className="field">
-            <span>Warna Garis</span>
-            <input
-              type="color"
-              value={toInputColor(selected.stroke)}
-              onChange={(e) => updateElement(selected.id, { stroke: e.target.value })}
-            />
-          </label>
-
-          <label className="field">
-            <span>Tebal Garis</span>
-            <input
-              type="number"
-              min={0}
-              max={40}
-              value={selected.strokeWidth}
-              onChange={(e) =>
-                updateElement(selected.id, { strokeWidth: Number(e.target.value) || 0 })
-              }
-            />
-          </label>
-        </>
-      )}
-
+    <div className="panel toolbar" data-toolbar={selected.type}>
+      {selected.type === "text" && <TextControls el={selected} />}
+      {selected.type === "shape" && <ShapeControls el={selected} />}
       {selected.type === "image" && (
-        <div className="field">
-          <span>Gambar</span>
-          <button
-            className="toolbar-button"
-            onClick={() => {
-              setReplaceError(null);
-              replaceTargetRef.current = selected.id;
-              replaceInputRef.current?.click();
-            }}
-            disabled={replaceBusy}
-            title="Ganti isi gambar; posisi dan lebar tetap, tinggi mengikuti rasio gambar baru"
-          >
-            {replaceBusy ? "Memuat…" : "Ganti gambar"}
-          </button>
-          <input
-            ref={replaceInputRef}
-            type="file"
-            accept="image/*"
-            style={{ display: "none" }}
-            onChange={handleReplaceFile}
-          />
-          {replaceError && <span className="error-note error-note--inline">{replaceError}</span>}
-        </div>
+        <ImageControls el={selected} stylePanelOpen={stylePanelOpen} onToggleStylePanel={onToggleStylePanel} />
       )}
-
-      <div className="field field--layering">
-        <span>Layer (z-index: {selected.zIndex})</span>
-        <div className="segmented">
-          <button onClick={() => reorderElement(selected.id, "back")}>⇤ Belakang</button>
-          <button onClick={() => reorderElement(selected.id, "backward")}>← Turun</button>
-          <button onClick={() => reorderElement(selected.id, "forward")}>Naik →</button>
-          <button onClick={() => reorderElement(selected.id, "front")}>Depan ⇥</button>
-        </div>
-      </div>
-
-      <button
-        className="danger"
-        onClick={() => removeElement(selected.id)}
-        title="Hapus (atau tekan Delete/Backspace)"
-      >
-        Hapus Elemen
-      </button>
+      <LayerControls el={selected} />
+      <Group grow>
+        <button
+          className="danger toolbar__delete"
+          onClick={() => removeElement(selected.id)}
+          title="Hapus (atau tekan Delete/Backspace)"
+        >
+          Hapus
+        </button>
+      </Group>
     </div>
   );
 }

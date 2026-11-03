@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useEditorStore } from "@/store/useEditorStore";
+import { selectCanvas, selectElements } from "@/store/selectors";
 import { toInputColor } from "@/lib/color";
 import {
   CANVAS_LIMITS,
@@ -70,9 +71,14 @@ function DimensionInput({
 }
 
 export default function WorkspacePanel() {
-  const canvas = useEditorStore((s) => s.canvas);
-  const elements = useEditorStore((s) => s.elements);
+  const canvas = useEditorStore(selectCanvas);
+  const elements = useEditorStore(selectElements);
+  const pageCount = useEditorStore((s) => s.pages.length);
+  const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
   const setCanvasMeta = useEditorStore((s) => s.setCanvasMeta);
+  // Size and background belong to a PAGE; this switch sends a change to all of them.
+  const [allPages, setAllPages] = useState(false);
+  const apply = (meta: Parameters<typeof setCanvasMeta>[0]) => setCanvasMeta(meta, { allPages });
 
   const activeRatio = matchRatio(canvas.width, canvas.height);
 
@@ -85,14 +91,36 @@ export default function WorkspacePanel() {
 
   return (
     <div className="workspace-panel">
+      {pageCount > 1 && (
+        <div className="panel-section">
+          <h3>
+            Halaman {currentPageIndex + 1} dari {pageCount}
+          </h3>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={allPages}
+              onChange={(e) => setAllPages(e.target.checked)}
+              data-workspace-control="all-pages"
+            />
+            <span>Terapkan ke semua halaman</span>
+          </label>
+          <p className="hint hint--tight">
+            {allPages
+              ? "Ukuran, rasio, dan latar yang diubah di bawah berlaku untuk seluruh halaman."
+              : "Perubahan di bawah hanya berlaku untuk halaman ini; tiap halaman boleh berukuran berbeda."}
+          </p>
+        </div>
+      )}
+
       <div className="panel-section">
         <h3>Ukuran kanvas (px)</h3>
         <div className="size-grid">
-          <DimensionInput label="Lebar" value={canvas.width} onCommit={(width) => setCanvasMeta({ width })} />
+          <DimensionInput label="Lebar" value={canvas.width} onCommit={(width) => apply({ width })} />
           <span className="size-grid__times" aria-hidden="true">
             ×
           </span>
-          <DimensionInput label="Tinggi" value={canvas.height} onCommit={(height) => setCanvasMeta({ height })} />
+          <DimensionInput label="Tinggi" value={canvas.height} onCommit={(height) => apply({ height })} />
         </div>
         <p className="hint hint--tight">
           {CANVAS_LIMITS.min}–{CANVAS_LIMITS.max} px. Tekan Enter atau klik di luar kolom untuk menerapkan.
@@ -107,7 +135,7 @@ export default function WorkspacePanel() {
               key={preset.id}
               className={`chip${activeRatio?.id === preset.id ? " active" : ""}`}
               aria-pressed={activeRatio?.id === preset.id}
-              onClick={() => setCanvasMeta(sizeForRatio(canvas, preset))}
+              onClick={() => apply(sizeForRatio(canvas, preset))}
             >
               {preset.label}
             </button>
@@ -127,7 +155,7 @@ export default function WorkspacePanel() {
             className="swatch-picker"
             aria-label="Warna latar belakang"
             value={toInputColor(canvas.backgroundColor)}
-            onChange={(e) => setCanvasMeta({ backgroundColor: e.target.value })}
+            onChange={(e) => apply({ backgroundColor: e.target.value })}
           />
           {BACKGROUND_SWATCHES.map((color) => (
             <button
@@ -136,7 +164,7 @@ export default function WorkspacePanel() {
               style={{ background: color }}
               title={color}
               aria-label={`Latar ${color}`}
-              onClick={() => setCanvasMeta({ backgroundColor: color })}
+              onClick={() => apply({ backgroundColor: color })}
             />
           ))}
         </div>
