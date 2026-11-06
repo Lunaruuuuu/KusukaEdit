@@ -265,3 +265,52 @@ export function sanitizeCropPatch(patch: CropPatch): CropPatch | null {
     cropHeight: Math.min(patch.cropHeight, 1 - cropY),
   };
 }
+
+/** The four corners of the WHOLE picture, where the round "scale" handles sit (Polotno-style). */
+export type PictureCorner = "nw" | "ne" | "se" | "sw";
+export const PICTURE_CORNERS: readonly PictureCorner[] = ["nw", "ne", "se", "sw"];
+
+/** How far the picture may be enlarged behind the crop window, relative to its current size. */
+export const MAX_PICTURE_SCALE = 20;
+
+/**
+ * Drags a corner of the WHOLE picture (not of the crop window) by (dx, dy)
+ * local design pixels: the picture grows or shrinks proportionally — never
+ * stretched — around its OPPOSITE corner, while the crop window (the box on
+ * the canvas) stays exactly where it is. This is Polotno's "zoom the photo
+ * inside the frame". The picture can never become smaller than the window:
+ * it always covers it, so no empty area can appear in the crop.
+ */
+export function scaleCropPicture(
+  el: CropTarget,
+  corner: PictureCorner,
+  delta: { dx: number; dy: number }
+): CropPatch {
+  const frame = cropFrame(el);
+  const fw = frame.fullWidth;
+  const fh = frame.fullHeight;
+  // The picture in window coordinates (0, 0 = the window's top-left corner).
+  const pic = { l: -frame.left, t: -frame.top, r: -frame.left + fw, b: -frame.top + fh };
+  const sx = corner.includes("e") ? 1 : -1;
+  const sy = corner.includes("s") ? 1 : -1;
+  // The drag projected on the picture's diagonal: one uniform scale factor.
+  let s = 1 + (sx * delta.dx * fw + sy * delta.dy * fh) / (fw * fw + fh * fh);
+  // The fixed corner, and the smallest scale that still covers the window.
+  const ax = sx === 1 ? pic.l : pic.r;
+  const ay = sy === 1 ? pic.t : pic.b;
+  const needX = sx === 1 ? (el.width - ax) / fw : ax / fw;
+  const needY = sy === 1 ? (el.height - ay) / fh : ay / fh;
+  s = clamp(s, Math.max(needX, needY), MAX_PICTURE_SCALE);
+  const nw = fw * s;
+  const nh = fh * s;
+  const left = -(sx === 1 ? ax : ax - nw);
+  const top = -(sy === 1 ? ay : ay - nh);
+  const scaled: CropFrame = { fullWidth: nw, fullHeight: nh, left, top };
+  return {
+    ...fractionsFor(el, scaled, { l: left, t: top, r: left + el.width, b: top + el.height }),
+    x: el.x,
+    y: el.y,
+    width: el.width,
+    height: el.height,
+  };
+}

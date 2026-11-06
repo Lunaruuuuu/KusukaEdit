@@ -6,7 +6,7 @@
       "runtimeExecutable": "docker",
       "runtimeArgs": [
         "run", "--rm", "--name", "kusuka-dev",
-        "-p", "3000:3000",
+        "-p", "3001:3000",
         "-e", "WATCHPACK_POLLING=true",
         "-e", "NEXT_TELEMETRY_DISABLED=1",
         "-v", "C:/Users/Ryu Nakata/Documents/Kulyeah/Magang/canvas-editor:/app",
@@ -16,7 +16,7 @@
         "node:24-slim",
         "npx", "next", "dev", "-H", "0.0.0.0", "-p", "3000"
       ],
-      "port": 3000
+      "port": 3001
     }
   ]
 }

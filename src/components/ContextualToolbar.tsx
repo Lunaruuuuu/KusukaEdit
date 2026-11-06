@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useEditorStore } from "@/store/useEditorStore";
 import { selectElementById } from "@/store/selectors";
 import type {
@@ -110,18 +110,45 @@ function Popover({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // The toolbar scrolls sideways on a narrow window, and a scrolling box clips
+  // whatever sticks out of it. So the panel is `position: fixed`, placed under
+  // its button in window coordinates and kept inside the window.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const button = buttonRef.current;
+      const panel = panelRef.current;
+      if (!button || !panel) return;
+      const r = button.getBoundingClientRect();
+      const margin = 8;
+      const left = Math.max(margin, Math.min(r.left, window.innerWidth - panel.offsetWidth - margin));
+      panel.style.left = `${left}px`;
+      panel.style.top = `${r.bottom + 6}px`;
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
+    // The button moves when the toolbar is scrolled: the panel would be left behind.
+    const toolbar = rootRef.current?.closest(".toolbar");
+    const onScroll = () => setOpen(false);
+    toolbar?.addEventListener("scroll", onScroll);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
     window.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
     return () => {
+      toolbar?.removeEventListener("scroll", onScroll);
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
     };
@@ -130,6 +157,7 @@ function Popover({
   return (
     <div className="popover" ref={rootRef}>
       <button
+        ref={buttonRef}
         type="button"
         className={`tool-button${compact ? "" : " tool-button--wide"}${open || active ? " tool-button--on" : ""}`}
         aria-label={title}
@@ -142,7 +170,7 @@ function Popover({
         {label}
       </button>
       {open && (
-        <div className="popover__panel" role="dialog" aria-label={title} data-popover={action}>
+        <div ref={panelRef} className="popover__panel" role="dialog" aria-label={title} data-popover={action}>
           {children}
         </div>
       )}

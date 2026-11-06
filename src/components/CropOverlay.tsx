@@ -1,18 +1,21 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { ImageElement } from "@/types/editor";
 import { useEditorStore } from "@/store/useEditorStore";
 import { selectElementById } from "@/store/selectors";
 import {
   CROP_HANDLES,
+  PICTURE_CORNERS,
   cropFrame,
   cropPatchChanges,
   panCrop,
   resizeCrop,
+  scaleCropPicture,
   toLocalDelta,
   type CropHandle,
   type CropPatch,
+  type PictureCorner,
 } from "@/lib/crop";
 
 // ---------------------------------------------------------------------------
@@ -27,18 +30,21 @@ import {
 //     "dimming mask" over everything OUTSIDE the crop window: the part that is
 //     going to be cut off stays visible, but darkened (a live preview);
 //   - the crop window — the part that stays, at full brightness — with a
-//     rule-of-thirds grid and 8 handles.
+//     rule-of-thirds (3x3) grid and 8 amber handles;
+//   - a thin outline round the whole picture with a round handle on each of
+//     its corners.
 //
-// The handles are deliberately NOT the Transformer's: the Transformer (resize)
-// is a blue frame with round white dots; cropping is amber, with thick
-// L-shaped corner brackets and bars on the edges — the look of a crop tool —
-// plus a "PANGKAS" chip, so the two modes cannot be mistaken for each other.
-//
-// Drag a handle to move that edge (the box shrinks or grows with it, the
-// picture itself never rescales); drag inside the window to slide the picture
-// under it. A gesture only changes a local preview; it is written to the store
-// ONCE, when the pointer is released, so one gesture is exactly one undo step
-// however long it lasts. The maths is in lib/crop.ts.
+// It works like Polotno's crop, with nothing to read and no button to press:
+//   - drag an amber handle to move that edge of the window (the box shrinks or
+//     grows with it, the picture itself never rescales);
+//   - drag inside the window to slide the picture under it;
+//   - drag a round corner of the picture to zoom the picture inside the window
+//     (proportionally; it always keeps covering the window);
+//   - click anywhere outside the picture, or press Enter / Esc, to finish.
+// Every gesture is saved when the pointer is released (one gesture = one undo
+// step), so "finishing" only closes the overlay. The handles are not the
+// Transformer's (blue frame, round white dots): cropping is amber, so the two
+// modes cannot be mistaken for each other. The maths is in lib/crop.ts.
 // ---------------------------------------------------------------------------
 
 interface Props {
@@ -56,7 +62,10 @@ export default function CropOverlay({ zoom }: Props) {
   return <CropEditor key={element.id} element={element} zoom={zoom} />;
 }
 
-type GestureInput = { kind: "pan" } | { kind: "resize"; handle: CropHandle };
+type GestureInput =
+  | { kind: "pan" }
+  | { kind: "resize"; handle: CropHandle }
+  | { kind: "scale"; corner: PictureCorner };
 type Gesture = GestureInput & { startX: number; startY: number; base: ImageElement };
 
 const HANDLE_CURSOR: Record<CropHandle, string> = {
@@ -79,6 +88,22 @@ function CropEditor({ element, zoom }: { element: ImageElement; zoom: number }) 
   const gestureRef = useRef<Gesture | null>(null);
   const latestRef = useRef<CropPatch | null>(null);
 
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // A press anywhere outside the picture finishes cropping, like Polotno. The
+  // contextual toolbar and the effects panel are not "outside": their controls
+  // work on this picture (the toolbar's crop button finishes it itself).
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Element | null;
+      if (!target || rootRef.current?.contains(target)) return;
+      if (target.closest?.("[data-toolbar], [data-style-panel]")) return;
+      setCroppingId(null);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [setCroppingId]);
+
   const shown: ImageElement = draft ? { ...element, ...draft } : element;
   const frame = cropFrame(shown);
   const flip = `scale(${shown.scaleX === -1 ? -1 : 1}, ${shown.scaleY === -1 ? -1 : 1})`;
@@ -96,7 +121,12 @@ function CropEditor({ element, zoom }: { element: ImageElement; zoom: number }) 
     const g = gestureRef.current;
     if (!g) return;
     const delta = toLocalDelta(e.clientX - g.startX, e.clientY - g.startY, zoom, g.base.rotation);
-    const patch = g.kind === "resize" ? resizeCrop(g.base, g.handle, delta) : panCrop(g.base, delta);
+    const patch =
+      g.kind === "resize"
+        ? resizeCrop(g.base, g.handle, delta)
+        : g.kind === "scale"
+          ? scaleCropPicture(g.base, g.corner, delta)
+          : panCrop(g.base, delta);
     latestRef.current = patch;
     setDraft(patch);
   };
@@ -120,12 +150,13 @@ function CropEditor({ element, zoom }: { element: ImageElement; zoom: number }) 
     onPointerCancel: (e: React.PointerEvent<HTMLElement>) => end(e, false),
   });
 
-  // Every size below is in design pixels; dividing by the zoom keeps handles
-  // and text the same size on screen.
+  // Every size below is in design pixels; dividing by the zoom keeps the
+  // handles the same size on screen.
   const unit = 1 / (zoom > 0 ? zoom : 1);
 
   return (
     <div
+      ref={rootRef}
       className="crop-editor"
       data-crop-editor=""
       style={{
@@ -171,16 +202,22 @@ function CropEditor({ element, zoom }: { element: ImageElement; zoom: number }) 
         ))}
       </div>
 
+      {/* The whole picture's outline and its round corners: drag one to zoom
+          the picture inside the window (Polotno's round handles). */}
       <div
-        className="crop-editor__hint"
-        style={{ top: shown.height + 8 * unit }}
-        onPointerDown={(e) => e.stopPropagation()}
+        className="crop-editor__picture"
+        data-crop-picture=""
+        style={{ left: -frame.left, top: -frame.top, width: frame.fullWidth, height: frame.fullHeight }}
       >
-        <span className="crop-editor__chip">PANGKAS</span>
-        <span>Seret siku/tepi: pangkas · seret gambar: geser · Enter/Esc: selesai</span>
-        <button type="button" onClick={() => setCroppingId(null)}>
-          Selesai
-        </button>
+        {PICTURE_CORNERS.map((corner) => (
+          <span
+            key={corner}
+            className={`crop-editor__scale crop-editor__scale--${corner}`}
+            data-crop-scale={corner}
+            style={{ cursor: HANDLE_CURSOR[corner] }}
+            {...gestureProps({ kind: "scale", corner })}
+          />
+        ))}
       </div>
     </div>
   );

@@ -4,18 +4,20 @@ Prototipe / MVP komponen design editor kanvas untuk Next.js, terinspirasi dari
 arsitektur [Polotno](https://polotno.com/). Dibangun dengan **React-Konva**
 untuk rendering kanvas, dan **Zustand** untuk state management.
 
-Status: **MVP kerja praktek, versi 8** (paket `0.8.0`, rilis "KusukaEdit Ver 0.6") — di
-atas semua fitur sebelumnya (multi-halaman, adapter Polotno dua arah, crop, filter & efek
-gambar, export PNG/JPG/ZIP, template, dan seterusnya), versi ini menambahkan:
-**efek lintas elemen** (transparansi dan bayangan untuk teks, bentuk, dan gambar; garis tepi
-huruf pada teks) yang juga disalin dari/ke Polotno tanpa peringatan, **toolbar kontekstual
-satu baris ala Polotno** untuk teks (warna, font, ukuran dengan panah, B/I/U/S, perataan
-termasuk justify, daftar berpoin/bernomor, spasi huruf & baris, huruf besar/kecil, Efek),
-gambar (Pangkas, Balik, Efek, Pas halaman, Mask) dan bentuk (isi, garis tepi, tebal, Efek),
-**seleksi ganda** lewat kotak seret (marquee) dan `Ctrl/Cmd`+klik dengan satu Transformer
-untuk semuanya, serta **auto-fit teks** (ukuran huruf mengecil sendiri bila teks tidak muat
-di kotaknya). Skema JSON native naik ke **v4** (semua field baru opsional; berkas v3 dibuka
-apa adanya).
+Status: **MVP kerja praktek, versi 9** (paket `0.9.0`, rilis "KusukaEdit Ver 0.7") — versi
+ini menata ulang **alur masuk dan keluar berkas mengikuti Polotno**: semua jalur masuk
+(proyek JSON dengan **pratinjau deteksi**, gambar, template) dikumpulkan di tab **Impor** di
+panel kiri, sedangkan ekspor (PNG, JPG, JSON KusukaEdit, JSON Polotno) menjadi satu tombol
+**Ekspor** dengan menu di header, tepat di kanan Undo/Redo — panel kanan (`ActionPanel`)
+dihapus dan kanvas mendapat seluruh lebarnya. Selain itu: **strip halaman yang bisa
+dilipat**, **crop ala Polotno** (tanpa banner/petunjuk/tombol Selesai; selesai dengan klik di
+luar gambar atau `Enter`/`Esc`; pegangan bulat di sudut gambar untuk memperbesar foto di
+dalam bingkai), dan **tata letak responsif** (panel kiri menjadi *drawer* di jendela sempit,
+toolbar bisa digulir ke samping, kanvas selalu *fit* ke sisa ruang).
+
+Versi 8 (rilis "Ver 0.6") menambahkan efek lintas elemen (transparansi, bayangan, garis tepi
+huruf), toolbar satu baris ala Polotno, seleksi ganda (marquee dan `Ctrl/Cmd`+klik), dan
+auto-fit teks; skema JSON native v4.
 
 ## Daftar isi
 
@@ -26,6 +28,8 @@ apa adanya).
 - [Spesifikasi State & Store](#spesifikasi-props--state-store-layer)
 - [Dokumen multi-halaman (pages)](#dokumen-multi-halaman-pages)
 - [Tata letak antarmuka](#tata-letak-antarmuka)
+- [Impor & ekspor berkas (alur Polotno)](#impor--ekspor-berkas-alur-polotno)
+- [Tata letak responsif](#tata-letak-responsif)
 - [Upload gambar & manajemen memori](#upload-gambar--manajemen-memori)
 - [Pengaturan workspace (ukuran, rasio, latar)](#pengaturan-workspace-ukuran-rasio-latar)
 - [Fit-to-Screen & zoom kanvas](#fit-to-screen--zoom-kanvas)
@@ -69,6 +73,18 @@ apa adanya).
       menu **Efek**; gambar — Pangkas, Reset, **Balik** (horizontal/vertikal), Efek, **Pas
       halaman**, **Mask**, Ganti; bentuk — warna isi, warna & tebal garis tepi, sudut, Efek;
       lalu menu Posisi (lapisan) dan Hapus
+- [x] **Alur berkas ala Polotno** (v9): tab **Impor** di panel kiri (proyek JSON dengan
+      pratinjau deteksi format/halaman/ukuran/peringatan sebelum dibuka, unggah gambar,
+      pintasan ke template) dan tombol **Ekspor** di header dengan menu PNG / JPG /
+      JSON KusukaEdit / JSON Polotno, resolusi, dan cakupan halaman
+- [x] **Strip halaman lipat** (v9): tombol chevron melipat thumbnail dan tombol halaman;
+      kanvas langsung mengisi ruangnya; pilihan diingat browser
+- [x] **Crop ala Polotno** (v9): tanpa banner atau tombol; klik di luar gambar atau
+      `Enter`/`Esc` untuk selesai; grid 3×3 dan lapisan gelap tetap; **pegangan bulat** di
+      sudut gambar utuh untuk memperbesar/memperkecil foto di dalam bingkai
+- [x] **Tata letak responsif** (v9): panel kiri menjadi *drawer* di bawah 1100 px, toolbar
+      kontekstual bisa digulir ke samping, popover tetap di dalam layar, kanvas *fit*
+      otomatis ke sisa ruang (diuji pada 1440, 900, dan 420 px)
 - [x] **Export / Import JSON** dengan dua pilihan format: **Native (KusukaEdit)**
       dan **Polotno-compatible**; format file terdeteksi otomatis saat import
 - [x] **Galeri template**: 11 kartu thumbnail — 7 berkas format Polotno (beberapa
@@ -116,7 +132,7 @@ apa adanya).
       dengan ukuran sendiri) — batas "hanya halaman pertama" sudah tidak ada
 - [x] **Indikator crop**: lapisan gelap semi-transparan di luar jendela potong
       (pratinjau bagian yang terbuang) dan handle **siku tebal berwarna amber** + chip
-      "PANGKAS", jelas berbeda dari bingkai biru dengan titik putih bulat milik
+      "PANGKAS" (chip dihapus di v9), jelas berbeda dari bingkai biru dengan titik putih bulat milik
       Transformer (resize)
 - [x] **Panel Filter & Efek gambar**: kecerahan, kontras, saturasi, 7 preset
       (hitam-putih, sepia, pudar, cerah, hangat, dingin, dramatis) berdampingan dengan
@@ -137,7 +153,7 @@ apa adanya).
 - [x] **Auto-fit teks** (v8): kotak teks bertinggi tetap; ukuran huruf mengecil
       proporsional (kelipatan 0,5 px) sampai tidak ada baris yang keluar dari tinggi kotak
       dan tidak ada kata yang lebih lebar dari kotak, diukur dengan `measureSize` Konva
-- [x] **Test suite** (`npm test`, 247 tes) untuk adapter, store dan halaman, memori
+- [x] **Test suite** (`npm test`, 253 tes) untuk adapter, store dan halaman, memori
       gambar, ukuran kanvas, zoom, export, ZIP, template, crop, drop, filter, efek gambar,
       efek lintas elemen, opsi teks, auto-fit, marquee, dan seleksi ganda
 
@@ -175,6 +191,8 @@ canvas-editor/
 │   │   ├── textFit.ts             # Auto-fit teks: bungkus kata seperti Konva + cari ukuran huruf terbesar yang muat (murni)
 │   │   ├── selection.ts           # Marquee: kotak dari dua titik, perpotongan kotak berotasi (SAT), hasil seleksi (murni)
 │   │   ├── transform.ts           # Transformer -> field elemen ("bake" skala ke lebar/tinggi/ukuran huruf) (murni)
+│   │   ├── fileFlow.ts            # Impor: pratinjau deteksi berkas; Ekspor: pilihan format, nama berkas (murni)
+│   │   ├── useMediaQuery.ts       # Hook React: media query (mode drawer panel kiri)
 │   │   ├── imageFilters.ts        # Filter warna: matriks 4x5 (kecerahan, kontras, saturasi, preset) + piksel
 │   │   ├── zoom.ts                # Skala tampilan: fit, langkah zoom, ukuran Stage (fungsi murni)
 │   │   ├── useCanvasZoom.ts       # Hook React: mode Fit/manual, ukur area, Ctrl+scroll
@@ -211,7 +229,8 @@ canvas-editor/
 │       ├── ImageStylePanel.tsx    # Panel Filter | Efek | Bayangan & garis untuk gambar
 │       ├── PageStrip.tsx          # Strip halaman: thumbnail, Tambah, Duplikat, Hapus
 │       ├── HistoryControls.tsx    # Tombol Undo/Redo
-│       └── ActionPanel.tsx        # Export/Import JSON (Native/Polotno) + Export Gambar (cakupan halaman)
+│       ├── ImportPanel.tsx        # Tab Impor: proyek JSON (pratinjau deteksi -> Buka desain), gambar, template
+│       └── ExportMenu.tsx         # Tombol Ekspor di header: PNG / JPG / JSON KusukaEdit / JSON Polotno, resolusi, halaman
 ├── tests/                         # `npm test` — lihat "Catatan pengujian"
 │   ├── core.test.ts               # Adapter, color, store (history, clipboard, JSON), migrasi (22 tes)
 │   ├── media-workspace.test.ts    # Gambar, memori (revoke), ukuran kanvas, adapter gambar (28 tes)
@@ -221,6 +240,7 @@ canvas-editor/
 │   ├── filters-export.test.ts     # Filter, sudut membulat, setImageStyle, ZIP, urutan batch export (33 tes)
 │   ├── templates.test.ts          # Semua template dan contoh (28 tes)
 │   ├── v4-effects-selection.test.ts # Efek lintas elemen, opsi teks, auto-fit, marquee, seleksi ganda (23 tes)
+│   ├── ui-flow.test.ts            # Pratinjau impor, pilihan ekspor, skala gambar di crop (6 tes)
 │   ├── helpers.ts                 # E(), C(), onePage(), mkPage(): jalan pintas untuk dokumen berhalaman
 │   ├── harness.ts                 # Test runner kecil (tanpa dependensi)
 │   ├── stubs/                     # Pengganti tipis zustand & uuid agar jalan di Node
@@ -458,6 +478,14 @@ bawahnya, halaman aktif diberi bingkai biru), label "Halaman 2 / 3", tombol **Ta
 Pemberitahuan singkat ("Halaman dihapus. Tekan Ctrl+Z untuk membatalkan.") tampil di
 samping label. Selama export semua halaman strip dikunci.
 
+**Lipat / buka (v9).** Tombol chevron (`▾` / `▴`, `data-page-action="toggle-tray"`) di kiri
+label melipat strip: thumbnail dan tombol Tambah/Duplikat/Hapus disembunyikan, yang tersisa
+hanya bilah tipis berisi label halaman dan tombol **‹ ›** (halaman sebelumnya/berikutnya,
+bila ada lebih dari satu halaman). Kanvas mendapat tingginya dan langsung *fit* lagi (hook
+zoom mengamati ukuran areanya dengan `ResizeObserver`; di 1440×900 tinggi area kanvas naik
+dari 567 ke 681 px dan zoom dari 48 % ke 59 %). Pilihannya disimpan di `localStorage`
+(`kusukaedit.pageTrayCollapsed`), dengan `try/catch` agar mode privat tetap berjalan.
+
 Tab **Kanvas** punya kotak centang **Terapkan ke semua halaman**: bila dicentang, ukuran
 dan latar yang diubah berlaku untuk seluruh halaman (`setCanvasMeta(meta, { allPages:
 true })`), satu langkah undo; bila tidak, hanya halaman aktif.
@@ -466,30 +494,93 @@ true })`), satu langkah undo; bila tidak, hanya halaman aktif.
 
 ## Tata letak antarmuka
 
-Susunan dirapikan ala Polotno: kontrol **kontekstual** di atas kanvas, **panel samping**
-dengan rel tab di kiri, dan **navigasi halaman** di bawah.
+Susunan mengikuti Polotno: **header** dengan Undo/Redo dan **Ekspor**, **panel samping**
+dengan rel tab di kiri (semua yang **masuk**: elemen, impor, template, pengaturan kanvas),
+kontrol **kontekstual** di atas kanvas, dan **strip halaman** yang bisa dilipat di bawah.
+Sejak v9 tidak ada lagi kolom kanan.
 
 ```
-┌─ header: judul ─────────────────────────────── Undo  Redo ┐
-│ rel │ panel tab  │  ContextualToolbar (mengikuti seleksi)   │ panel kanan
-│ tab │  aktif     │  ImageStylePanel (Filter | Efek | …)     │ Data (JSON)
-│     │            │  Kanvas (Stage) + kontrol zoom           │ Gambar (PNG/JPG)
-│     │            │  PageStrip (thumbnail halaman)           │ Cakupan, format…
-└────────────────────────────────────────────────────────────┘
+┌─ header: judul ─────────────────────────── Undo  Redo  [⬇ Ekspor ▾] ┐
+│ rel │ panel tab  │  ContextualToolbar (mengikuti seleksi)            │
+│ tab │  aktif     │  ImageStylePanel (Filter | Efek | …)              │
+│     │ (bisa      │  Kanvas (Stage) + kontrol zoom                    │
+│     │  dilipat)  │  PageStrip ▾ (thumbnail halaman, bisa dilipat)    │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Rel tab vertikal** (`SidePanel.tsx`): **Elemen** (tambah teks dan bentuk),
-  **Gambar** (unggah; petunjuk drag-and-drop), **Template** (kartu thumbnail),
-  **Kanvas** (ukuran, rasio, latar, "terapkan ke semua halaman").
-- **`ContextualToolbar`** mengelompokkan kontrol dalam blok berlabel dengan pemisah
-  (urutan seperti Polotno: yang khas elemen lebih dulu, lalu susunan lapisan, **Hapus**
-  di kanan): *Teks* + *Perataan*; *Bentuk*; *Pangkas* (Pangkas / Reset) + *Gambar*
-  (Ganti, **✦ Filter & Efek**); *Susun (z n)*. Toolbar membungkus rapi di jendela
-  sempit dan menampilkan petunjuk bila tak ada yang dipilih.
-- **`ImageStylePanel`** muncul di bawah toolbar bila gambar dipilih dan tombol
-  **✦ Filter & Efek** menyala; tiga kartu berdampingan — lihat "Filter & efek gambar".
-- **Panel kanan** (`ActionPanel`): data JSON (Native | Polotno, Export, Import), lalu
-  export gambar dengan pilihan **Cakupan** (lihat "Export ke gambar").
+- **Rel tab vertikal** (`SidePanel.tsx`): **Elemen** (tambah teks dan bentuk, pintasan ke
+  Impor), **Impor** (proyek JSON, gambar, template — lihat "Impor & ekspor berkas"),
+  **Template** (kartu thumbnail), **Kanvas** (ukuran, rasio, latar, "terapkan ke semua
+  halaman", dan **Desain baru** yang dulu bernama "Kosongkan Dokumen" di panel kanan).
+  Mengklik tab yang sedang aktif **melipat** panel (tinggal rel); tombol `«` di kepala panel
+  juga melipatnya.
+- **`ContextualToolbar`**: satu baris kontrol untuk elemen terpilih (lihat "Toolbar
+  kontekstual ala Polotno"); di jendela sempit bisa digulir ke samping.
+- **`ImageStylePanel`** muncul di bawah toolbar bila gambar dipilih dan tombol **✦ Efek**
+  menyala; tiga kartu berdampingan — lihat "Filter & efek gambar".
+- **Header**: Undo, Redo, lalu **⬇ Ekspor ▾** (`ExportMenu.tsx`).
+
+---
+
+## Impor & ekspor berkas (alur Polotno)
+
+Polotno memisahkan arah berkas: **masuk** lewat panel kiri (tab *Import*: satu kartu per
+jenis berkas, masing-masing dengan tombol "Choose file") dan **keluar** lewat tombol
+*Download* di bilah atas. Sejak v9 editor ini sama.
+
+### Masuk: tab Impor (`ImportPanel.tsx`)
+
+| Kartu | Isi |
+|---|---|
+| **Proyek desain (JSON)** | **Pilih berkas** (`.json`, `.polotno`) → berkas dibaca dan **dideteksi dulu** tanpa mengubah desain: kartu pratinjau menampilkan thumbnail halaman pertama, nama berkas, lencana format (**KusukaEdit** / **Polotno**), jumlah halaman dan elemen, ukuran (`1080 × 1080 px` atau `2 ukuran berbeda`), dan semua peringatan adapter. **Buka desain** mengganti seluruh dokumen (satu langkah undo, sama seperti dulu); **Batal** membuang pratinjau. Berkas rusak menampilkan pesan galat adapter, dan desain tidak tersentuh |
+| **Gambar** | **Pilih berkas** (PNG, JPG, WebP, GIF, SVG) → dipasang di halaman aktif, sama dengan alur unggah sebelumnya; seret-lepas ke kanvas tetap bisa |
+| **Template** | pintasan **Buka galeri template** ke tab Template |
+
+Pratinjau dibuat oleh `previewImport(text, fileName)` di `lib/fileFlow.ts` (fungsi murni di
+atas `parseDocument`, diuji di Node); yang dibuka lewat **Buka desain** adalah teks berkas yang
+sama, lewat `loadFromJSON` seperti sebelumnya. Bedanya dengan v8: dulu berkas langsung
+mengganti desain begitu dipilih; sekarang pengguna melihat dulu apa yang terdeteksi.
+
+### Keluar: tombol Ekspor di header (`ExportMenu.tsx`)
+
+Tombol **⬇ Ekspor ▾** di kanan Undo/Redo membuka satu menu:
+
+1. **Jenis berkas** (`data-export-format`): **PNG**, **JPG**, **JSON KusukaEdit**,
+   **JSON Polotno**, masing-masing dengan keterangan singkat.
+2. Untuk PNG/JPG: **Resolusi** 1x / 2x / 3x dan **Halaman** — *Halaman aktif* atau
+   *Semua (n) · ZIP* (nonaktif bila hanya ada satu halaman).
+3. Ringkasan hasil (`Kanvas 1080 × 1080 px → 2160 × 2160 px`, atau isi ZIP / isi berkas JSON).
+4. **Unduh …** — memanggil fungsi yang sama dengan panel kanan dulu (`exportStageAsImage`,
+   `exportAllPagesAsZip`, `exportToJSON`), jadi hasil berkasnya tidak berubah.
+
+Pesan hasil dan peringatan tampil di bawah tombol Unduh. Jenis berkas dan resolusi terakhir
+diingat di `localStorage` (`kusukaedit.export`). Menu tertutup dengan `Esc` atau klik di
+luarnya; saat export semua halaman berjalan, menu menutup dan kanvas menampilkan progres.
+
+---
+
+## Tata letak responsif
+
+`app/globals.css` (bagian "v9") dan `SidePanel.tsx`:
+
+- **Kolom utama** memakai CSS Grid `auto minmax(0, 1fr)`: panel kiri selebar isinya
+  (300 px terbuka, 72 px bila dilipat), kanvas sisanya. Tidak ada lebar tetap lain, jadi
+  halaman tidak pernah bergulir ke samping (diperiksa pada 1440, 900, dan 420 px).
+- **Drawer** di bawah 1100 px (`useMediaQuery("(max-width: 1100px)")`): hanya rel tab yang
+  menempati kolom; isi tab melayang di atas kanvas (lebar maks. 320 px, bayangan, latar
+  gelap di belakangnya). Drawer mulai tertutup; klik tab membukanya, klik latar gelap,
+  tombol `«`, atau `Esc` menutupnya. Melebarkan jendela lagi membuat panel kembali menjadi
+  kolom yang terbuka.
+- **Toolbar kontekstual** tidak lagi membungkus: bila tidak muat ia bergulir ke samping
+  (`overflow-x: auto`). Panel popover (Efek, Spasi, Balik, Mask, Posisi) memakai
+  `position: fixed` yang dihitung dari posisi tombolnya dan dijepit ke dalam jendela,
+  karena kotak yang bergulir akan memotong apa pun yang keluar dari batasnya; popover
+  tertutup bila toolbar digulir.
+- **Di bawah 760 px**: subjudul header dan teks "Undo/Redo" disembunyikan (ikon tetap), padding
+  diperkecil, rel tab dipersempit, tombol strip halaman diperkecil dan boleh turun baris.
+- **Kanvas** tetap *fit* otomatis: `useCanvasZoom` mengukur area dengan `ResizeObserver`,
+  jadi melipat panel kiri, melipat strip halaman, membuka panel Efek, atau mengubah ukuran
+  jendela langsung menghitung ulang skala Stage tanpa terpotong.
 
 ---
 
@@ -497,7 +588,7 @@ dengan rel tab di kiri, dan **navigasi halaman** di bawah.
 
 ### Alur
 
-1. Tab **Gambar** (rel tab di kiri) → **⬆ Unggah gambar** membuka
+1. Tab **Impor** (rel tab di kiri) → kartu **Gambar** → **Pilih berkas** membuka
    `<input type="file" accept="image/*">` (tersembunyi di balik tombol). Nilai
    input di-reset setelah dipilih, sehingga berkas yang sama bisa dipilih lagi.
 2. `prepareImageFile(file)` (`lib/imageUpload.ts`): memastikan tipenya `image/*`
@@ -621,7 +712,7 @@ berlaku untuk seluruh dokumen (`{ allPages: true }`, satu langkah undo).
 (ditampilkan × zoom, lihat bagian berikutnya), kotak `.stage-wrap` (yang juga
 menjadi acuan overlay edit teks), dan persegi latar belakang. Hasil export gambar
 selalu = ukuran kanvas × `pixelRatio` — pada zoom berapa pun — tanpa langkah
-tambahan; panel kanan menampilkan hitungannya (`Kanvas 1200 × 675 px → hasil
+tambahan; menu Ekspor di header menampilkan hitungannya (`Kanvas 1200 × 675 px →
 2400 × 1350 px`) dan batas 8192 px per sisi dijelaskan di bagian export.
 
 Perubahan kanvas masuk history sebagai perubahan kontinu (`batchKey = "canvas"`),
@@ -658,7 +749,7 @@ itu `CanvasWorkspace` menampilkan Stage dengan **skala tampilan** (`zoom`):
   skala 1 dan ukuran desain, mengekspor, lalu memulihkan zoom, scroll, dan
   seleksi dalam `finally`. Poster 1080×1920 yang sedang tampil 31% tetap
   menghasilkan 1080×1920 × `pixelRatio` (2160×3840 pada 2x). Ukuran desain diberikan
-  `ActionPanel` dari store, bukan dibagi balik dari ukuran Stage yang sudah
+  `ExportMenu` dari store, bukan dibagi balik dari ukuran Stage yang sudah
   dibulatkan.
 - **Overlay edit teks** berada di `.overlay-layer` yang seukuran desain dan diberi
   `transform: scale(zoom)` yang sama dengan Stage, sehingga `<textarea>` tepat di
@@ -726,14 +817,18 @@ dalam kanvas).
 
 **Cara memakai.** Klik dua kali gambar, atau pilih gambar lalu tekan **Pangkas** di
 toolbar. Muncul lapisan crop (`CropOverlay.tsx`): gambar **utuh** pada ukurannya sekarang,
-dengan lapisan gelap di luar **jendela potong** (bagian yang tetap terlihat), dan
-jendela itu punya 8 handle amber. Lihat "Indikator visual" di bawah.
+dengan lapisan gelap di luar **jendela potong** (bagian yang tetap terlihat), grid 3×3, 8
+handle amber pada jendela, dan **pegangan bulat** di keempat sudut gambar utuh. Sejak v9
+alurnya seperti Polotno: **tidak ada banner, teks petunjuk, atau tombol Selesai** di bawah
+gambar — tarik handle, lalu klik di mana saja di luar gambar (atau `Enter`/`Esc`) untuk
+selesai.
 
 | Aksi | Hasil |
 |---|---|
 | Seret tepi atau sudut bingkai | Tepi itu bergerak; kotak ikut mengecil/membesar. **Gambar tidak pernah diskalakan ulang** — piksel yang tetap terlihat tetap di tempatnya di kanvas |
 | Seret isi bingkai | Gambar digeser di bawah bingkai (kotak tetap; bagian lain gambar yang terlihat) |
-| `Enter`, `Esc`, **Selesai**, klik elemen lain / area kosong | Tutup mode crop |
+| Seret **pegangan bulat** di sudut gambar utuh (v9) | Foto **diperbesar/diperkecil di dalam bingkai**, proporsional, dengan sudut seberangnya tetap; kotak di kanvas tidak bergerak. Foto tidak bisa lebih kecil dari bingkai (selalu menutupinya) dan paling besar 20× ukurannya — `scaleCropPicture()` di `lib/crop.ts` |
+| Klik di luar gambar (kanvas, panel, header), `Enter`, `Esc` | Selesai: mode crop ditutup. Toolbar kontekstual dan panel Efek **tidak** dihitung "di luar" — kontrolnya bekerja pada gambar itu, dan tombol **✓ Selesai** di toolbar tetap ada seperti tombol *Done* Polotno |
 | **Reset** (grup "Pangkas" di toolbar) | Tampilkan lagi seluruh gambar pada skalanya saat ini |
 | `Ctrl/Cmd + Z` | Batalkan gestur crop terakhir (dan tutup mode crop) |
 
@@ -756,7 +851,8 @@ Dua hal sengaja dibuat berbeda dari mode resize supaya keduanya tidak tertukar
    putih tipis dan garis bantu sepertiga.
 2. **Handle khas crop-tool.** Delapan handle berwarna **amber `#ffb020`**: empat sudut
    berupa **siku "L" tebal** (dua batang tegak lurus, `::before` dan `::after`) dan
-   empat tepi berupa batang tebal pendek, ditambah chip **PANGKAS** di petunjuk bawah.
+   empat tepi berupa batang tebal pendek (chip "PANGKAS" dan petunjuk di bawah gambar
+   dihapus di v9), ditambah pegangan bulat putih bercincin amber di sudut gambar utuh.
    Ukurannya tetap di layar pada zoom berapa pun (`--unit = 1 ÷ zoom`). Transformer
    (resize) tampil sebaliknya: bingkai **biru `#5b8cff`** dengan **titik putih bulat**
    (`anchorFill: "#ffffff"`, `anchorCornerRadius: 5`). Selama crop Transformer
@@ -788,7 +884,8 @@ batch 500 ms). Klik gagang tanpa menggeser tidak menulis apa-apa. Undo/Redo
 mengembalikan kotak **dan** crop bersama-sama.
 
 **Sengaja begitu:** (1) tidak ada "batal" — setiap gestur langsung tersimpan,
-`Esc` sama dengan `Enter` (selesai), dan pembatalan lewat `Ctrl+Z`;
+`Esc` sama dengan `Enter` (selesai), dan pembatalan lewat `Ctrl+Z` (Polotno punya tombol
+*Cancel*; di sini setiap gestur adalah satu langkah undo);
 (2) overlay crop adalah lapisan DOM (seperti editor teks), bukan `Transformer`
 Konva, sehingga bisa diuji di browser tanpa Konva; (3) selama mode crop efek
 (filter warna, blur, sudut membulat, mask, bayangan, garis tepi) tidak ditampilkan —
@@ -917,7 +1014,7 @@ Berkas contoh: [`examples/sample-effects.polotno.json`](./examples/sample-effect
 (gambar blur; lingkaran dengan garis tepi + bayangan; segitiga dari `clipSrc` URL;
 crop + garis + bayangan; lingkaran cermin + blur) dan template **Katalog produk**
 (kecerahan, sepia, hitam-putih, kontras+saturasi, blur, sudut membulat, mask) — dimuat
-**tanpa peringatan**. Pakai tombol **Import JSON** atau tab **Template**.
+**tanpa peringatan**. Pakai tab **Impor** (kartu Proyek desain) atau tab **Template**.
 
 ### Cara digambar
 
@@ -1279,16 +1376,16 @@ Pola **linear undo stack** yang dipakai hampir semua editor:
 
 ## Export ke Gambar (PNG / JPG)
 
-Panel kanan → **Gambar (PNG/JPG)** punya pilihan **Cakupan**:
+Tombol **⬇ Ekspor** di header → pilih **PNG** atau **JPG** → pilihan **Halaman**:
 
 | Cakupan | Hasil |
 |---|---|
 | **Halaman aktif** (default) | satu berkas PNG/JPG dari halaman yang sedang tampil, lewat `stage.toDataURL()` |
 | **Semua halaman** | satu berkas **ZIP** (`<nama>-semua-halaman.zip`) berisi satu gambar per halaman, bernomor (`desain-halaman-01.png`, `…-02.png`, …), masing-masing pada **ukuran halamannya sendiri** × resolusi |
 
-Tombol "Semua halaman" nonaktif bila dokumen hanya punya satu halaman; ringkasan di
-bawah tombol selalu menyebut ukuran hasil ("2 halaman → satu ZIP berisi 2 berkas PNG,
-masing-masing 2160 × 2160 px").
+Pilihan "Semua (n) · ZIP" nonaktif bila dokumen hanya punya satu halaman; ringkasan di
+atas tombol Unduh selalu menyebut ukuran hasil ("2 berkas PNG dalam satu ZIP, masing-masing
+2160 × 2160 px").
 
 ### Satu halaman: `exportStageAsImage`
 
@@ -1296,15 +1393,15 @@ masing-masing 2160 × 2160 px").
 mengunduh, `exportStageAsImage()` memanggil keduanya:
 
 1. `CanvasWorkspace` mendaftarkan Stage aktif ke store (`stageNode`), sehingga
-   `ActionPanel` bisa mengekspor tanpa prop-drilling.
+   menu Ekspor di header (`ExportMenu`) bisa mengekspor tanpa prop-drilling.
 2. Sebelum rasterisasi, handle **Transformer** dilepas sementara dan kanvas
    di-*redraw* **sinkron** (`stage.draw()`, bukan `batchDraw()`), supaya kotak
    seleksi tidak ikut masuk gambar; seleksi dikembalikan sesudahnya.
 3. `pixelRatio` 1x/2x/3x menentukan resolusi. Ukuran hasil = **ukuran desain
    (`canvas` halaman itu) × pixelRatio** — jadi mengubah ukuran kanvas di tab
    **Kanvas** langsung mengubah hasil export (900×600 pada 2x → 1800×1200;
-   1200×675 pada 2x → 2400×1350). Panel kanan menampilkan angka itu sebelum Anda
-   menekan tombol export. Zoom tampilan tidak berpengaruh: sebelum rasterisasi
+   1200×675 pada 2x → 2400×1350). Menu Ekspor menampilkan angka itu sebelum Anda
+   menekan Unduh. Zoom tampilan tidak berpengaruh: sebelum rasterisasi
    Stage dikembalikan ke skala 1 pada ukuran desain, dan sesudahnya (juga bila
    gagal) zoom, posisi scroll, dan seleksi dipulihkan.
 4. **Batas aman:** browser membatasi ukuran `<canvas>`, dan `toDataURL()` yang
@@ -1807,11 +1904,9 @@ Polotno (`visible: true`, dst.) ditulis eksplisit; `opacity` adalah transparansi
 upload sudah berupa `data:` URL pada saat ini (lihat "Upload gambar"), jadi file
 Polotno hasil export tetap utuh — di **semua** halaman.
 
-Pemilihan format ada di panel kanan (`ActionPanel`): tombol **Native | Polotno**
-menentukan format unduhan; tombol **Import JSON** selalu mendeteksi format dari
-isi berkas (bukan dari nama file). Keterangan di bawah tombol menyebut jumlah halaman
-yang akan disimpan, dan setelah import menyebut format yang terdeteksi dan jumlah
-halamannya.
+Pemilihan format ada di menu **Ekspor** di header (**JSON KusukaEdit** / **JSON
+Polotno**); kartu **Proyek desain** di tab Impor selalu mendeteksi format dari isi berkas
+(bukan dari nama file) dan menampilkannya di pratinjau sebelum berkas dibuka.
 
 ### Kompatibilitas: apa yang sudah dan belum dipastikan
 
@@ -1933,7 +2028,10 @@ Setiap elemen sebaiknya punya `id` unik (adapter membuatkan id bila kosong atau 
 |---|---|
 | Double-click teks | Edit teks langsung di kanvas |
 | Double-click gambar | Mode crop (Pangkas) |
-| `Enter` / `Esc` | (saat crop) selesai — setiap gestur sudah tersimpan; `Delete` dan panah dinonaktifkan |
+| `Enter` / `Esc` / klik di luar gambar | (saat crop) selesai — setiap gestur sudah tersimpan; `Delete` dan panah dinonaktifkan |
+| Seret pegangan bulat di sudut gambar (saat crop) | Perbesar/perkecil foto di dalam bingkai |
+| Klik tab aktif di rel kiri / `«` | Lipat panel kiri (di jendela sempit: tutup drawer; `Esc` juga) |
+| Chevron `▾` di strip halaman | Lipat / buka strip halaman |
 | Seret berkas gambar dari desktop ke kanvas | Sisipkan gambar di posisi kursor dilepas |
 | `Enter` / `Esc` / klik di luar | (saat edit) simpan dan selesai |
 | `Shift + Enter` | (saat edit) baris baru |
@@ -2014,7 +2112,7 @@ npm install
 npm test
 ```
 
-`npm test` menjalankan **delapan berkas** di `tests/` lewat [`tsx`](https://tsx.is/)
+`npm test` menjalankan **sembilan berkas** di `tests/` lewat [`tsx`](https://tsx.is/)
 (devDependency), **tanpa browser dan tanpa Next.js** — butuh Node 20+ (memakai
 `Blob`, `URL.createObjectURL`, dan `fetch(blob:)` bawaan Node; diuji pada Node 22). Zustand dan uuid
 diganti stub tipis di `tests/stubs/` lewat `tests/tsconfig.json`, dengan kontrak
@@ -2031,9 +2129,10 @@ diganti stub tipis di `tests/stubs/` lewat `tests/tsconfig.json`, dengan kontrak
 | `tests/vector-text-view.test.ts` | `cleanPolotnoText` (paragraf, `<br>`, baris kosong, entitas, teks polos dengan `<`/`>`, atribut berisi `>`), teks HTML lewat adapter + peringatan, SVG (impor, ekspor `svg`, `colorsReplace` data URI/base64/tautan), flip dan skala negatif (*property test* 36 kombinasi rotasi × skala), toleransi lebar teks (per `align`, rotasi, bolak-balik tanpa membengkak), `fitZoom`/`stepZoom`/`scaledSize`, `loadRevision`, export bebas zoom dengan Stage palsu (termasuk gagal dan batas 8192 px), `drawPicture` | 35 |
 | `tests/pages.test.ts` | **halaman**: `createBlankPage`, `duplicatePageData` (id baru untuk halaman dan semua elemen), indeks (jepit, validasi, setelah hapus), selectors; store — satu halaman awal, `addPage` (setelah halaman aktif, ukuran diwariskan), `duplicatePage` (id baru, indeks buruk tidak mencatat history), `deletePage` (halaman terakhir dilindungi, undo), **`goToPage` menyetel ulang seleksi/edit/crop**, aksi elemen hanya menyentuh halaman aktif, clipboard lintas halaman, **gestur di halaman 2 tetap satu langkah undo dan Undo membawa kembali ke halaman 2**, `setCanvasMeta` (`allPages`), export/load JSON semua halaman (native dan Polotno), berkas buruk tidak mengubah apa pun; adapter — dokumen banyak halaman pulang-pergi, ukuran halaman `"auto"` vs angka, urutan tumpukan per halaman, **seluruh halaman diimpor**, id unik antarhalaman, `pages` kosong, latar gambar, deteksi v3, migrasi v1/v2 → v3, versi lebih baru ditolak, idempotensi v3 | 37 |
 | `tests/v4-effects-selection.test.ts` | **v8**: `resolveOpacity`/`resolveShadow`; `applyElementStylePatch` per tipe (kunci gambar diabaikan pada teks, garis tepi bentuk tidak bisa dihapus, objek sama = tanpa langkah undo); opsi teks (dekorasi, `displayText` dengan huruf besar/kecil dan penomoran, `readTextOptions` native vs `custom` Polotno, nilai buruk dibuang); **adapter**: opacity dan bayangan teks/bentuk disalin tanpa peringatan, bayangan mati tidak dibaca, stroke/spasi/underline/case/justify teks disalin, yang masih tak didukung tetap dilaporkan, **semua field v4 pulang-pergi tanpa kehilangan**, validasi berkas native v4; **auto-fit** (bungkus kata, kata kepanjangan, ukuran terbesar yang muat pada kelipatan 0,5, batas bawah, spasi huruf proporsional); **marquee** (arah seret, kotak berotasi diuji tepat, menyentuh = kena, mode menambah); `bakeTransform`; `fitElementToPage`; **store**: `setSelection`/`toggleSelected`, seleksi ganda digeser dan dihapus sebagai satu langkah undo, `updateElements`, `undefined` menghapus field, seleksi direset oleh pindah halaman/Undo/elemen baru, `setElementStyle`, `flipImage`, `fitToPage` | 23 |
+| `tests/ui-flow.test.ts` | **v9**: `scaleCropPicture` (memperbesar dari sudut, rasio tetap, kotak tidak bergerak, sudut seberang diam; tidak pernah lebih kecil dari jendela dari sudut mana pun; batas 20×; gambar tercermin), `previewImport` (format, halaman, elemen, label ukuran, store tidak tersentuh, berkas Polotno 2 halaman, berkas rusak/tidak dikenal), pilihan ekspor (`EXPORT_CHOICES`, `jsonFormatOf`, `isExportChoice`, nama berkas) | 6 |
 | `tests/filters-export.test.ts` | **filter**: matriks identitas, kecerahan/kontras/saturasi angka demi angka, preset lebih dulu lalu slider, `multiplyMatrices`, `filterKey` dan batas ukuran salinan; `cornerRadius` dan filter di `resolveImageEffects`; `applyImageStylePatch` (jepit, bulatkan, abaikan nilai buruk, objek sama = tanpa langkah undo, `undefined` menghapus); `setImageStyle` (satu geseran = satu langkah undo, hanya gambar di halaman aktif); `drawPicture` dengan sudut membulat (urutan klip, jari-jari dijepit, bayangan di luar bentuk, area klik); **Polotno** (`brightness`, `filters.contrast/saturation`, hitam-putih/sepia, filter tak dikenal dilaporkan sekali, preset di `custom`, `cornerRadius` di bawah mask tetap ditulis, pulang-pergi); validasi file native; **ZIP** (`crc32` nilai standar, `dataUrlToBytes`, struktur arsip, arsip kosong, cap waktu DOS); **batch** (urutan render, progres, halaman awal dipulihkan, galat dilempar setelah dipulihkan, nama berkas bernomor, `waitUntil`) | 33 |
 
-Total **247 tes** (22 + 28 + 28 + 41 + 35 + 37 + 33 + 23); semuanya lulus pada saat README
+Total **253 tes** (22 + 28 + 28 + 41 + 35 + 37 + 33 + 23 + 6); semuanya lulus pada saat README
 ini ditulis (Node 24 di container `node:24-slim`, karena mesin pengembangan v8 tidak punya
 Node terpasang). `npx tsc --noEmit` juga bersih.
 
@@ -2043,6 +2142,29 @@ folder `node_modules/` di proyek tidak disentuh):
 ```bash
 docker run --rm -v "$PWD:/app" -v kusuka_nm:/app/node_modules -w /app node:24-slim sh -c "npm install && npm test && npx tsc --noEmit"
 ```
+
+### Diuji di browser dengan Konva asli (v9)
+
+`next dev` di container `node:24-slim` (port 3001), Chromium:
+
+- **Tab Impor**: berkas JSON native 2 halaman dipilih → pratinjau menampilkan thumbnail,
+  "KusukaEdit · 2 halaman · 1 elemen · 2 ukuran berbeda", desain belum berubah ("Halaman
+  1 / 1"); **Buka desain** → "Halaman 1 / 2" dan pesan hasil; **Batal** membuang pratinjau.
+- **Menu Ekspor** di kanan Undo/Redo: empat jenis berkas; JSON menyembunyikan resolusi dan
+  halaman serta mengubah tombol menjadi "Unduh JSON Polotno"; PNG menampilkan 1x/2x/3x,
+  "Halaman aktif" / "Semua (2) · ZIP", dan "Kanvas 1080 × 1080 px → 2160 × 2160 px". Tombol
+  **Unduh** sendiri tidak ditekan (fungsi di baliknya sama dengan v8).
+- **Strip halaman**: dilipat → tinggi area kanvas 567 → 681 px, zoom 48 % → 59 %, tombol ›
+  pindah ke halaman 2; dibuka lagi → kembali seperti semula.
+- **Crop** dengan mouse sungguhan: tidak ada banner/petunjuk; tepi kanan ditarik (lebar
+  jendela berkurang), pegangan bulat kanan-bawah ditarik → gambar utuh membesar dari
+  648 × 432 ke 711,8 × 474,6 px dengan jendela tetap; klik di area kosong halaman menutup
+  crop dan lebar elemen menjadi 372,3 px; dibuka lagi dari toolbar, `Enter` menutupnya.
+- **Responsif**: 900 × 700 → mode drawer (rel 72 px), drawer terbuka di atas kanvas dengan
+  latar gelap dan tertutup lewat klik latar; 420 × 800 → toolbar bergulir ke samping, tidak
+  ada scroll horizontal halaman, Stage muat di areanya (zoom 29 %), popover Mask tetap di
+  dalam layar; kembali ke 1440 → panel menjadi kolom terbuka, toolbar tidak bergulir.
+- Tidak ada galat di konsol browser maupun log server.
 
 ### Diuji di browser dengan Konva asli (v8)
 
@@ -2182,6 +2304,16 @@ dibaca dari halaman aktif.
 
 ### Belum diuji
 
+- **Fitur v9 yang belum diperiksa:**
+  1. Tombol **Unduh** di menu Ekspor tidak ditekan di browser selama pengujian v9 (agar
+     tidak mengunduh berkas); fungsi ekspornya sama dengan v8, hanya dipanggil dari tempat lain.
+  2. Drawer dan toolbar bergulir di **perangkat sentuh** sungguhan (iPad/ponsel); yang
+     diuji adalah viewport sempit di Chromium desktop dengan mouse.
+  3. Pegangan bulat crop pada gambar yang **diputar**: matematikanya diuji (delta dipetakan
+     ke sumbu elemen seperti gagang lain), tetapi belum diseret dengan mouse pada gambar
+     berotasi. Saat belum ada potongan, pegangan bulat menumpuk di atas siku amber di
+     sudut yang sama (seperti di Polotno); siku masih bisa diraih di lengannya.
+  4. Polotno punya tombol *Cancel* di mode crop; di sini pembatalan lewat `Ctrl+Z`.
 - **Fitur v8 yang belum dilihat di Konva asli / Polotno asli:**
   1. Menyeret **jangkar** Transformer dengan mouse sungguhan untuk auto-fit dan untuk
      skala sudut seleksi ganda (ukuran huruf ikut). Yang dijalankan adalah gestur yang

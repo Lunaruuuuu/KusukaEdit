@@ -76,6 +76,7 @@ export default function WorkspacePanel() {
   const pageCount = useEditorStore((s) => s.pages.length);
   const currentPageIndex = useEditorStore((s) => s.currentPageIndex);
   const setCanvasMeta = useEditorStore((s) => s.setCanvasMeta);
+  const reset = useEditorStore((s) => s.reset);
   // Size and background belong to a PAGE; this switch sends a change to all of them.
   const [allPages, setAllPages] = useState(false);
   const apply = (meta: Parameters<typeof setCanvasMeta>[0]) => setCanvasMeta(meta, { allPages });
@@ -176,6 +177,20 @@ export default function WorkspacePanel() {
           gambar. Perbesar kanvas untuk menampilkannya lagi.
         </p>
       )}
+
+      <div className="panel-section">
+        <h3>Dokumen</h3>
+        <div className="panel-buttons">
+          <button
+            className="ghost"
+            onClick={reset}
+            title="Hapus semua halaman dan mulai dari satu halaman kosong (bisa dibatalkan dengan Ctrl+Z)"
+            data-action="new-design"
+          >
+            Desain baru (kosongkan dokumen)
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -87,7 +87,8 @@ button:disabled {
 .editor-body {
   flex: 1;
   display: grid;
-  grid-template-columns: 296px minmax(0, 1fr) 248px;
+  /* the side panel sizes itself (rail only when folded); the canvas takes the rest */
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 14px;
   padding: 14px;
   overflow: hidden;
@@ -108,8 +109,7 @@ button:disabled {
   padding: 14px;
 }
 
-.side-panel,
-.action-panel {
+.side-panel {
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -136,8 +136,7 @@ button:disabled {
   gap: 6px;
 }
 
-.panel-buttons button,
-.action-panel > .panel-section > button {
+.panel-buttons button {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -152,8 +151,7 @@ button:disabled {
   width: 100%;
 }
 
-.panel-buttons button:not(:disabled):hover,
-.action-panel button:not(:disabled):hover {
+.panel-buttons button:not(:disabled):hover {
   background: #2d3240;
   border-color: var(--accent);
 }
@@ -302,13 +300,13 @@ button:disabled {
   padding: 40px;
 }
 
-.action-panel .ghost {
+.panel-buttons .ghost {
   background: transparent;
   border: 1px dashed var(--border);
   color: var(--text-muted);
 }
 
-.action-panel .ghost:hover {
+.panel-buttons .ghost:hover {
   border-color: var(--text-muted);
   background: transparent;
 }
@@ -727,7 +725,8 @@ input:focus-visible {
    Cropping must not look like resizing. The Transformer (resize) is a BLUE
    frame with ROUND WHITE dots. Cropping is AMBER, with thick L-shaped corner
    brackets and bars on the edges, a thin white frame, a rule-of-thirds grid,
-   and a dark mask over what will be cut off.
+   a dark mask over what will be cut off, and round amber-ringed handles on the
+   corners of the whole picture. No banner, hint or button: like Polotno.
    ------------------------------------------------------------------------- */
 .crop-editor {
   position: absolute;
@@ -841,39 +840,30 @@ input:focus-visible {
 .crop-editor__handle--e::before { left: 0; top: 0; width: var(--crop-arm); height: 100%; }
 .crop-editor__handle--w::before { right: 0; top: 0; width: var(--crop-arm); height: 100%; }
 
-.crop-editor__hint {
+/* The whole picture (Polotno-style): a thin outline, and a round handle on each
+   corner that zooms the picture inside the window. Only the handles take the
+   pointer; a press on the dimmed part outside the window passes through. */
+.crop-editor__picture {
   position: absolute;
-  left: 0;
-  display: flex;
-  align-items: center;
-  gap: calc(8px * var(--unit));
-  width: max-content;
-  padding: calc(4px * var(--unit)) calc(8px * var(--unit));
-  font-size: calc(12px * var(--unit));
-  color: var(--text-primary);
-  background: var(--bg-panel);
-  border: calc(1px * var(--unit)) solid var(--border);
-  border-radius: calc(6px * var(--unit));
-  white-space: nowrap;
+  pointer-events: none;
+  outline: calc(1px * var(--unit)) solid rgba(255, 255, 255, 0.55);
 }
-.crop-editor__chip {
-  padding: calc(1px * var(--unit)) calc(7px * var(--unit));
-  font-size: calc(10px * var(--unit));
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--crop-ink);
-  background: var(--crop);
-  border-radius: calc(4px * var(--unit));
+.crop-editor__scale {
+  position: absolute;
+  width: calc(14px * var(--unit));
+  height: calc(14px * var(--unit));
+  margin: calc(-7px * var(--unit)) 0 0 calc(-7px * var(--unit));
+  pointer-events: auto;
+  touch-action: none;
+  background: #ffffff;
+  border: calc(2px * var(--unit)) solid var(--crop);
+  border-radius: 50%;
+  box-shadow: 0 0 0 calc(1px * var(--unit)) rgba(0, 0, 0, 0.35);
 }
-.crop-editor__hint button {
-  padding: calc(2px * var(--unit)) calc(8px * var(--unit));
-  font-size: calc(12px * var(--unit));
-  color: var(--crop-ink);
-  background: var(--crop);
-  border: none;
-  border-radius: calc(4px * var(--unit));
-  cursor: pointer;
-}
+.crop-editor__scale--nw { left: 0; top: 0; }
+.crop-editor__scale--ne { left: 100%; top: 0; }
+.crop-editor__scale--se { left: 100%; top: 100%; }
+.crop-editor__scale--sw { left: 0; top: 100%; }
 
 /* ======================================================================
    Side panel: a rail of tabs (icon over label) + the panel of the chosen tab
@@ -1218,7 +1208,7 @@ input:focus-visible {
   accent-color: var(--accent);
 }
 .is-exporting .side-panel,
-.is-exporting .action-panel,
+.is-exporting .export-menu,
 .is-exporting .toolbar,
 .is-exporting .style-panel,
 .is-exporting .page-strip,
@@ -1469,4 +1459,413 @@ input:focus-visible {
 .popover__list button.active {
   color: #0b0d12;
   background: var(--accent);
+}
+
+/* ======================================================================
+   v9: import tab, export menu, foldable page tray, responsive layout
+   ====================================================================== */
+[hidden] {
+  display: none !important;
+}
+
+/* ---- side panel: fixed width when open, rail only when folded ---- */
+.side-panel {
+  width: 300px;
+  position: relative;
+}
+.side-panel.is-collapsed {
+  width: 72px;
+}
+.side-content__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: -6px;
+}
+.side-content__head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.side-content__close {
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.side-content__close:hover {
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+.side-backdrop {
+  display: none;
+}
+
+/* ---- Import tab (Polotno-style cards) ---- */
+.import-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.import-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: #191c23;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.import-card h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.import-card > p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.import-card__choose {
+  width: 100%;
+  padding: 9px 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.import-card__choose:not(:disabled):hover {
+  border-color: var(--accent);
+  background: var(--bg-panel-raised);
+}
+.import-card__choose--primary {
+  color: #0b0d12;
+  font-weight: 600;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.import-card__choose--primary:not(:disabled):hover {
+  background: var(--accent-hover);
+}
+.import-preview {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px 10px;
+  padding: 10px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+}
+.import-preview > :not(.import-preview__thumb):not(.import-preview__facts) {
+  grid-column: 1 / -1;
+}
+.import-preview--error {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #ffb4b4;
+  border-color: var(--danger);
+}
+.import-preview__thumb {
+  width: 64px;
+  max-height: 96px;
+  overflow: hidden;
+  background: #ffffff;
+  border-radius: 3px;
+  align-self: start;
+}
+.import-preview__facts {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.import-preview__facts strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+.import-preview .badge {
+  display: inline-block;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #0b0d12;
+  background: var(--accent);
+  border-radius: 4px;
+}
+.import-preview__actions {
+  display: flex;
+  gap: 6px;
+}
+.warning-list--tight {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11px;
+}
+
+/* ---- Export menu in the header ---- */
+.export-menu {
+  position: relative;
+}
+.export-menu__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  font-weight: 600;
+  color: #0b0d12;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.export-menu__button:not(:disabled):hover {
+  background: var(--accent-hover);
+}
+.export-menu__caret {
+  font-size: 10px;
+}
+.export-menu__panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(320px, calc(100vw - 24px));
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  padding: 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+}
+.export-menu__heading {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.export-menu__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.export-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 7px 10px;
+  text-align: left;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.export-choice span {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.export-choice:hover {
+  border-color: var(--accent);
+}
+.export-choice.active {
+  background: rgba(91, 140, 255, 0.14);
+  border-color: var(--accent);
+}
+.export-menu__download {
+  padding: 9px 12px;
+  font-weight: 600;
+  color: #0b0d12;
+  background: var(--accent);
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.export-menu__download:not(:disabled):hover {
+  background: var(--accent-hover);
+}
+
+/* ---- foldable page tray ---- */
+.page-strip.is-collapsed {
+  gap: 0;
+  padding: 5px 12px;
+}
+.page-strip__toggle {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  font-size: 13px;
+  color: var(--text-muted);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.page-strip__toggle:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+.page-strip__nav {
+  display: inline-flex;
+  gap: 4px;
+}
+
+/* ---- the contextual toolbar scrolls sideways instead of wrapping ---- */
+.toolbar {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.toolbar__row {
+  flex-wrap: nowrap;
+}
+.toolbar__row > *,
+.toolbar__end > * {
+  flex: none;
+}
+.popover__panel {
+  position: fixed;
+}
+
+/* ---- header ---- */
+.editor-header {
+  min-width: 0;
+}
+.editor-header h1 {
+  white-space: nowrap;
+}
+
+/* ======================================================================
+   Responsive: narrower windows
+   ====================================================================== */
+@media (max-width: 1100px) {
+  .editor-body {
+    gap: 10px;
+    padding: 10px;
+  }
+  /* drawer mode: the rail stays, the panel of the tab floats over the canvas */
+  .side-panel.is-drawer {
+    width: 72px;
+    overflow: visible;
+    z-index: 40;
+  }
+  .side-panel.is-drawer .side-content {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 71px;
+    z-index: 2;
+    width: min(320px, calc(100vw - 100px));
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 0 10px 10px 0;
+    box-shadow: 12px 0 34px rgba(0, 0, 0, 0.5);
+  }
+  .side-panel.is-drawer .side-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    background: rgba(6, 8, 12, 0.45);
+  }
+  .side-panel.is-drawer .side-rail {
+    position: relative;
+    z-index: 3;
+    border-radius: 10px;
+  }
+}
+
+@media (max-width: 760px) {
+  .editor-header {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .editor-header__subtitle,
+  .history-controls__label {
+    display: none;
+  }
+  .editor-header h1 {
+    font-size: 14px;
+  }
+  .editor-body {
+    gap: 8px;
+    padding: 8px;
+  }
+  .editor-center {
+    gap: 8px;
+  }
+  .side-panel.is-drawer,
+  .side-panel.is-collapsed {
+    width: 58px;
+  }
+  .side-rail {
+    width: 58px;
+    padding: 6px 4px;
+  }
+  .side-rail__label {
+    font-size: 10px;
+  }
+  .side-panel.is-drawer .side-content {
+    left: 57px;
+    width: min(320px, calc(100vw - 72px));
+  }
+  .canvas-scroll {
+    padding: 12px;
+  }
+  .toolbar {
+    min-height: 50px;
+    padding: 8px 10px;
+  }
+  .page-strip__notice {
+    display: none;
+  }
+  .page-thumb__image {
+    height: 48px;
+  }
+  .page-thumb--add {
+    height: 62px;
+  }
+}
+
+/* toolbar row keeps its natural width so a narrow toolbar scrolls instead of overlapping */
+.toolbar__row {
+  flex: 1 0 auto;
+}
+.history-controls button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.page-strip__actions .toolbar-button {
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .page-strip__bar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .page-strip__actions .toolbar-button {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
 }

@@ -17,7 +17,8 @@ export default function HistoryControls() {
         title="Undo (Ctrl/Cmd+Z)"
         aria-label="Undo"
       >
-        ↶ Undo
+        <span aria-hidden="true">↶</span>
+        <span className="history-controls__label">Undo</span>
       </button>
       <button
         onClick={redo}
@@ -25,7 +26,8 @@ export default function HistoryControls() {
         title="Redo (Ctrl/Cmd+Shift+Z)"
         aria-label="Redo"
       >
-        ↷ Redo
+        <span aria-hidden="true">↷</span>
+        <span className="history-controls__label">Redo</span>
       </button>
     </div>
   );

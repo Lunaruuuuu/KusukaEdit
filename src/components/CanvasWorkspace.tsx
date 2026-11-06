@@ -113,7 +113,7 @@ export default function CanvasWorkspace() {
   }, []);
 
   // Hand the live Stage instance to the store once, on mount, so
-  // ActionPanel's "Export PNG/JPG" button can reach it without any prop
+  // the header's Export menu (PNG/JPG) can reach it without any prop
   // drilling. Cleared again on unmount so nothing holds a dangling ref.
   useEffect(() => {
     setStageNode(stageRef.current);

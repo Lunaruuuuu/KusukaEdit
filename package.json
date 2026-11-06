@@ -1,13 +1,13 @@
 {
   "name": "canvas-design-editor",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "tsx --tsconfig tests/tsconfig.json tests/core.test.ts && tsx --tsconfig tests/tsconfig.json tests/templates.test.ts && tsx --tsconfig tests/tsconfig.json tests/media-workspace.test.ts && tsx --tsconfig tests/tsconfig.json tests/vector-text-view.test.ts && tsx --tsconfig tests/tsconfig.json tests/image-tools.test.ts && tsx --tsconfig tests/tsconfig.json tests/pages.test.ts && tsx --tsconfig tests/tsconfig.json tests/filters-export.test.ts && tsx --tsconfig tests/tsconfig.json tests/v4-effects-selection.test.ts"
+    "test": "tsx --tsconfig tests/tsconfig.json tests/core.test.ts && tsx --tsconfig tests/tsconfig.json tests/templates.test.ts && tsx --tsconfig tests/tsconfig.json tests/media-workspace.test.ts && tsx --tsconfig tests/tsconfig.json tests/vector-text-view.test.ts && tsx --tsconfig tests/tsconfig.json tests/image-tools.test.ts && tsx --tsconfig tests/tsconfig.json tests/pages.test.ts && tsx --tsconfig tests/tsconfig.json tests/filters-export.test.ts && tsx --tsconfig tests/tsconfig.json tests/v4-effects-selection.test.ts && tsx --tsconfig tests/tsconfig.json tests/ui-flow.test.ts"
   },
   "dependencies": {
     "konva": "^9.3.6",

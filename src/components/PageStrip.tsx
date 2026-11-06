@@ -9,9 +9,15 @@ import TemplateThumbnail from "./TemplateThumbnail";
 // and the three page actions — add a blank page, duplicate the active page
 // (with all its elements), delete the active page. Clicking a thumbnail shows
 // that page; the store resets the selection when it does.
+//
+// The tray folds away (the chevron on its bar): folded, only the bar stays —
+// the page number and previous / next — and the canvas gets the height (it
+// re-fits itself: the zoom hook watches the size of its area). The choice is
+// remembered in this browser.
 // ---------------------------------------------------------------------------
 
 const NOTICE_MS = 5000;
+const STORAGE_KEY = "kusukaedit.pageTrayCollapsed";
 
 export default function PageStrip() {
   const pages = useEditorStore((s) => s.pages);
@@ -23,6 +29,24 @@ export default function PageStrip() {
   const busy = useEditorStore((s) => s.exportProgress !== null);
 
   const [notice, setNotice] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  // Restored after mounting (localStorage does not exist on the server).
+  useEffect(() => {
+    try {
+      setCollapsed(window.localStorage.getItem(STORAGE_KEY) === "1");
+    } catch {
+      /* private mode: always starts open */
+    }
+  }, []);
+  const toggle = () =>
+    setCollapsed((was) => {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, was ? "0" : "1");
+      } catch {
+        /* not remembered */
+      }
+      return !was;
+    });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeRef = useRef<HTMLButtonElement | null>(null);
 
@@ -41,23 +65,63 @@ export default function PageStrip() {
   // Keep the active thumbnail in view when pages are added or the strip is long.
   useEffect(() => {
     activeRef.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-  }, [currentPageIndex, pages.length]);
+  }, [currentPageIndex, pages.length, collapsed]);
 
   const count = pages.length;
   const isLast = count <= 1;
 
   return (
-    <section className="panel page-strip" aria-label="Halaman" data-page-strip="">
+    <section
+      className={`panel page-strip${collapsed ? " is-collapsed" : ""}`}
+      aria-label="Halaman"
+      data-page-strip=""
+      data-page-tray={collapsed ? "collapsed" : "open"}
+    >
       <div className="page-strip__bar">
+        <button
+          type="button"
+          className="page-strip__toggle"
+          onClick={toggle}
+          aria-expanded={!collapsed}
+          aria-controls="page-strip-list"
+          title={collapsed ? "Buka panel halaman" : "Lipat panel halaman (kanvas mendapat ruang lebih)"}
+          data-page-action="toggle-tray"
+        >
+          <span aria-hidden="true">{collapsed ? "▴" : "▾"}</span>
+        </button>
         <strong className="page-strip__title" data-page-label="">
           Halaman {currentPageIndex + 1} / {count}
         </strong>
+        {collapsed && count > 1 && (
+          <span className="page-strip__nav">
+            <button
+              type="button"
+              className="toolbar-button"
+              onClick={() => goToPage(currentPageIndex - 1)}
+              disabled={busy || currentPageIndex === 0}
+              aria-label="Halaman sebelumnya"
+              data-page-action="prev"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              className="toolbar-button"
+              onClick={() => goToPage(currentPageIndex + 1)}
+              disabled={busy || currentPageIndex === count - 1}
+              aria-label="Halaman berikutnya"
+              data-page-action="next"
+            >
+              ›
+            </button>
+          </span>
+        )}
         {notice && (
           <span className="page-strip__notice" role="status">
             {notice}
           </span>
         )}
-        <div className="page-strip__actions">
+        <div className="page-strip__actions" hidden={collapsed}>
           <button
             className="toolbar-button"
             onClick={() => {
@@ -96,7 +160,7 @@ export default function PageStrip() {
         </div>
       </div>
 
-      <div className="page-strip__list" role="tablist" aria-label="Daftar halaman">
+      <div className="page-strip__list" id="page-strip-list" role="tablist" aria-label="Daftar halaman" hidden={collapsed}>
         {pages.map((page, i) => {
           const active = i === currentPageIndex;
           return (
