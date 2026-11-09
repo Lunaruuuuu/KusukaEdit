@@ -390,13 +390,13 @@ test("Polotno: grayscale / sepia flags are presets; grayscale wins when both are
   assert.equal(importPic({ sepiaEnabled: true }).el.filterPreset, "sepia");
   const both = importPic({ grayscaleEnabled: true, sepiaEnabled: true });
   assert.equal(both.el.filterPreset, "grayscale");
-  assert.match(both.warnings.join(" "), /1 gambar mengaktifkan grayscale dan sepia sekaligus/);
+  assert.match(both.warnings.join(" "), /1 elemen mengaktifkan grayscale dan sepia sekaligus/);
 });
 
 test("Polotno: a filter this editor does not have is ignored and reported once; contrast alone is fine", () => {
   const emboss = importPic({ filters: { emboss: { intensity: 0.7 }, contrast: { intensity: 0.2 } } });
   assert.equal(emboss.el.contrast, 20, "what is known is still imported");
-  assert.match(emboss.warnings.join(" "), /1 gambar memakai filter \(objek filters\) selain kontras dan saturasi/);
+  assert.match(emboss.warnings.join(" "), /1 elemen memakai filter \(objek filters\) selain kontras dan saturasi/);
   assert.deepEqual(importPic({ filters: { contrast: { intensity: 0.2 } } }).warnings, []);
   assert.deepEqual(importPic({ filters: { emboss: { intensity: 0 } } }).warnings, [], "an effect at 0 does nothing");
 });

@@ -132,8 +132,9 @@ test("effects: applyElementStylePatch — each type takes its own keys, a shape 
   assert.equal(styled.shadowColor, "#ff0000");
   assert.equal(styled.stroke, "#00ff00");
   assert.equal(styled.strokeWidth, 3);
-  // picture-only keys are ignored on text
-  assert.equal(applyElementStylePatch(t, { blurRadius: 5, maskShape: "circle" }), t);
+  // picture-only keys are ignored on text (blur is on every type since v5)
+  assert.equal(applyElementStylePatch(t, { maskShape: "circle" }), t);
+  assert.equal(applyElementStylePatch(t, { blurRadius: 5 }).blurRadius, 5);
   // nothing changes -> the same object (no undo step)
   assert.equal(applyElementStylePatch(styled, { opacity: 0.5 }), styled);
   // clearing removes the keys
@@ -231,7 +232,8 @@ test("adapter: text stroke, letter spacing, underline, case and justify are copi
 });
 
 test("adapter: what text still cannot do is still reported", () => {
-  for (const extra of [{ blurEnabled: true }, { textDecoration: "overline" }, { textTransform: "capitalize" }, { backgroundEnabled: true }]) {
+  // (blur and the text background are supported since v5: see v5-effects-text.test.ts)
+  for (const extra of [{ textDecoration: "overline" }, { textTransform: "capitalize" }]) {
     const r = convertPolotnoToKusuka(polotno([{ id: "t", type: "text", x: 0, y: 0, width: 100, text: "Hai", fontSize: 20, ...extra }]));
     assert.match(r.warnings.join("|"), /efek yang belum didukung/, JSON.stringify(extra));
   }

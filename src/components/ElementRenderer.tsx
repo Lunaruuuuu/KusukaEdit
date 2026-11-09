@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useCallback, useLayoutEffect, useMemo, useRef } from "react";
-import { Rect, Ellipse, Text, Shape } from "react-konva";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { Rect, Ellipse, Text, Shape, Group, TextPath } from "react-konva";
 import Konva from "konva";
 import type { CanvasElement, ImageElement, TextElement } from "@/types/editor";
 import { useEditorStore } from "@/store/useEditorStore";
@@ -21,6 +21,19 @@ import {
 import { filterKey, filterPicture } from "@/lib/imageFilters";
 import { displayText } from "@/lib/textOptions";
 import { fitFontSize, makeMeasure } from "@/lib/textFit";
+import {
+  backgroundLineBoxes,
+  curveLayout,
+  curveText,
+  fitRadius,
+  isCurved,
+  resolveTextBackground,
+  sanitizeDash,
+  type Box,
+  type CurveLayout,
+} from "@/lib/textEffects";
+import { ensureFontLoaded, getFontsVersion, subscribeFonts } from "@/lib/fontLoader";
+import { useNodeFilters } from "@/lib/useNodeFilters";
 
 interface Props {
   element: CanvasElement;
@@ -83,7 +96,7 @@ function shadowProps(shadow: ResolvedShadow | null): ShadowProps {
 let measuringNode: Konva.Text | null = null;
 
 /** Auto-fit: the font size an auto-fit text is drawn with (see lib/textFit.ts). */
-function useFittedFontSize(el: TextElement, shown: string): number {
+function useFittedFontSize(el: TextElement, shown: string, fontsVersion: number): number {
   return useMemo(() => {
     if (!el.autoFit) return el.fontSize;
     measuringNode ??= new Konva.Text({ text: "" });
@@ -99,7 +112,206 @@ function useFittedFontSize(el: TextElement, shown: string): number {
       { text: shown, width: el.width, height: el.height, fontSize: el.fontSize, lineHeight: el.lineHeight },
       measure
     );
-  }, [el.autoFit, el.fontFamily, el.fontStyle, el.fontSize, el.letterSpacing, el.width, el.height, el.lineHeight, shown]);
+    // fontsVersion: a font that finished loading measures differently
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [el.autoFit, el.fontFamily, el.fontStyle, el.fontSize, el.letterSpacing, el.width, el.height, el.lineHeight, shown, fontsVersion]);
+}
+
+/** Width of one line of text as Konva draws it (letter spacing included). */
+function measureLine(el: TextElement, text: string, fontSize: number): number {
+  measuringNode ??= new Konva.Text({ text: "" });
+  const node = measuringNode;
+  node.fontFamily(el.fontFamily);
+  node.fontStyle(el.fontStyle);
+  node.fontSize(fontSize);
+  node.letterSpacing(0);
+  const spacing = (el.letterSpacing ?? 0) * fontSize;
+  return node.measureSize(text).width + spacing * Array.from(text).length;
+}
+
+/** Adds a rounded rectangle to the current path (a plain one when the radius is 0). */
+function roundRectPath(ctx: Konva.Context, box: Box, radius: number): void {
+  const r = fitRadius(radius, box);
+  const { x, y, width: w, height: h } = box;
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  if (r > 0) ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  if (r > 0) ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  if (r > 0) ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  if (r > 0) ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+/**
+ * A text element: a Group holding the optional background box and the text
+ * itself (a Konva.Text, or a Konva.TextPath on an arc for curved text). The
+ * GROUP is the node that is dragged, transformed, filtered and registered for
+ * the Transformer, so the box, the letters and their effects move as one.
+ *
+ * The background is a Shape with NO size of its own (it draws its boxes in its
+ * scene function): the Transformer's frame is computed from the children's
+ * sizes, so it stays exactly the text box — the padding grows outward, as in
+ * Polotno — while the boxes stay clickable through their hit function.
+ */
+function TextNode({
+  element: el,
+  common,
+  zoom,
+  onStartEditing,
+}: {
+  element: TextElement;
+  common: CommonKonvaProps;
+  zoom: number;
+  onStartEditing: () => void;
+}) {
+  const syncMeasuredHeight = useEditorStore((s) => s.syncMeasuredHeight);
+  const isEditing = useEditorStore((s) => s.editingId === el.id);
+  const fontsVersion = useSyncExternalStore(subscribeFonts, getFontsVersion, () => 0);
+
+  // The real font, not the fallback, must be measured (see lib/fontLoader.ts).
+  useEffect(() => {
+    void ensureFontLoaded(el.fontFamily);
+  }, [el.fontFamily]);
+
+  const shown = displayText(el);
+  const fittedSize = useFittedFontSize(el, shown, fontsVersion);
+  const curved = isCurved(el);
+
+  const curve: (CurveLayout & { text: string }) | null = useMemo(() => {
+    if (!curved) return null;
+    const text = curveText(shown);
+    return { ...curveLayout(measureLine(el, text, fittedSize), fittedSize, el.curvePower ?? 0, el.width), text };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [curved, shown, fittedSize, el.curvePower, el.width, el.fontFamily, el.fontStyle, el.letterSpacing, fontsVersion]);
+
+  const background = resolveTextBackground(el, fittedSize, el.lineHeight);
+  const shadow = resolveShadow(el);
+  const dash = sanitizeDash(el.dash);
+  const strokeOn = !!el.stroke && (el.strokeWidth ?? 0) > 0;
+
+  const { ref: registerRef, ...groupProps } = common;
+  const groupRef = useRef<Konva.Group | null>(null);
+  const textRef = useRef<Konva.Text | null>(null);
+  const setGroup = useCallback(
+    (node: Konva.Node | null) => {
+      groupRef.current = node as Konva.Group | null;
+      registerRef(node);
+    },
+    [registerRef]
+  );
+
+  // A font that finished loading: Konva lays the text out again with its real
+  // metrics (it does not do that by itself), then the layer is redrawn.
+  useLayoutEffect(() => {
+    const text = textRef.current as unknown as { _setTextData?: () => void } | null;
+    text?._setTextData?.();
+    groupRef.current?.getLayer()?.batchDraw();
+  }, [fontsVersion]);
+
+  // A text node has no fixed height: Konva lays the text out and wraps it
+  // inside `width`. Copy the measured height back into the store so exported
+  // JSON carries the real box (this does not create an undo step). An auto-fit
+  // box is the exception: its height is the user's, and the text fits into it.
+  // A curved text is as high as its arc.
+  const layoutKey = [shown, el.fontSize, el.fontFamily, el.fontStyle, el.lineHeight, el.width, el.letterSpacing, el.autoFit, curve?.height, fontsVersion].join("|");
+  useLayoutEffect(() => {
+    if (el.autoFit) return;
+    if (curve) {
+      syncMeasuredHeight(el.id, curve.height);
+      return;
+    }
+    const node = textRef.current;
+    if (node) syncMeasuredHeight(el.id, node.height());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutKey, el.id, syncMeasuredHeight]);
+
+  // Blur / colour filter of the whole text (box included).
+  const { id: _id, x: _x, y: _y, rotation: _r, zIndex: _z, ...look } = el;
+  useNodeFilters(groupRef, el, zoom, JSON.stringify(look) + `|${fittedSize}|${fontsVersion}`, true);
+
+  // The boxes behind the text: one per laid-out line, read from the Text node
+  // at draw time (Konva has just laid it out), or one around the arc.
+  const backgroundBoxes = (): Box[] => {
+    if (!background) return [];
+    if (curve) {
+      const left = (el.width - curve.span) / 2;
+      return [{ x: left - background.padding, y: -background.padding, width: curve.span + 2 * background.padding, height: curve.height + 2 * background.padding }];
+    }
+    const node = textRef.current as unknown as { textArr?: Array<{ width: number }> } | null;
+    const lines = node?.textArr ?? [];
+    return backgroundLineBoxes({
+      lineWidths: lines.map((l) => l.width),
+      lineHeightPx: fittedSize * el.lineHeight,
+      boxWidth: el.width,
+      align: el.align,
+      padding: background.padding,
+    });
+  };
+  const drawBoxes = (ctx: Konva.Context, shape: Konva.Shape) => {
+    ctx.beginPath();
+    // one path, filled once: overlapping line boxes do not darken each other
+    for (const box of backgroundBoxes()) roundRectPath(ctx, box, background?.cornerRadius ?? 0);
+    ctx.fillShape(shape);
+  };
+
+  // The shadow is cast by the box when there is one (like Polotno), else by the letters.
+  const textShadow = shadowProps(background ? null : shadow);
+  const textLook = {
+    fontSize: fittedSize,
+    fontFamily: el.fontFamily,
+    fontStyle: el.fontStyle,
+    // stored as a fraction of the font size (like Polotno); Konva wants px
+    letterSpacing: (el.letterSpacing ?? 0) * fittedSize,
+    textDecoration: el.textDecoration ?? "",
+    fill: el.fill,
+    stroke: strokeOn ? el.stroke : undefined,
+    strokeWidth: strokeOn ? el.strokeWidth : 0,
+    dash: strokeOn && dash ? dash : undefined,
+    dashEnabled: strokeOn && !!dash,
+    // the outline sits behind the letters, so it never eats into them
+    fillAfterStrokeEnabled: true,
+    ...textShadow,
+  };
+
+  return (
+    <Group
+      {...groupProps}
+      ref={setGroup}
+      // the group carries no shadow of its own (see textShadow / the box)
+      {...shadowProps(null)}
+      visible={!isEditing}
+      onDblClick={onStartEditing}
+      onDblTap={onStartEditing}
+    >
+      {background && (
+        <Shape
+          fill={background.color}
+          opacity={background.opacity}
+          {...shadowProps(shadow)}
+          perfectDrawEnabled={false}
+          sceneFunc={drawBoxes}
+          hitFunc={drawBoxes}
+        />
+      )}
+      {curve ? (
+        <TextPath data={curve.path} text={curve.text} align="center" textBaseline="middle" {...textLook} />
+      ) : (
+        <Text
+          ref={textRef}
+          width={el.width}
+          // auto-fit: a fixed box; otherwise Konva measures the height itself
+          height={el.autoFit ? el.height : undefined}
+          text={shown}
+          lineHeight={el.lineHeight}
+          align={el.align}
+          {...textLook}
+        />
+      )}
+    </Group>
+  );
 }
 
 // While a picture is still loading (or failed to load) its box is drawn as a
@@ -216,6 +428,7 @@ function ImageNode({
   const shadowKey = shadow
     ? `${shadow.color}|${shadow.blur}|${shadow.offsetX}|${shadow.offsetY}|${shadow.opacity}`
     : "";
+  const dashKey = (element.dash ?? []).join(",");
   useLayoutEffect(() => {
     const node = nodeRef.current;
     if (!node) return;
@@ -230,7 +443,7 @@ function ImageNode({
       clearImageBlur(node as unknown as BlurNode);
     }
     node.getLayer()?.batchDraw();
-  }, [blur, loaded, image, filtered, zoom, width, height, cropKey, flipX, flipY, mask, cornerRadius, strokeKey, shadowKey]);
+  }, [blur, loaded, image, filtered, zoom, width, height, cropKey, flipX, flipY, mask, cornerRadius, strokeKey, shadowKey, dashKey]);
 
   const startCropping = () => {
     selectAlone(); // a crop works on one picture
@@ -251,7 +464,8 @@ function ImageNode({
       fill={loaded ? (clipped && shadow !== null ? "#000000" : undefined) : PLACEHOLDER_FILL}
       stroke={loaded ? stroke?.color : status === "error" ? PLACEHOLDER_ERROR_STROKE : PLACEHOLDER_STROKE}
       strokeWidth={loaded ? (stroke?.width ?? 0) : 2}
-      dash={loaded ? undefined : [8, 6]}
+      // a loaded picture's border may be dashed; the loading placeholder always is
+      dash={loaded ? (stroke ? (sanitizeDash(element.dash) ?? undefined) : undefined) : [8, 6]}
       // the shadow of a picture that is still loading would be the placeholder's
       {...shadowProps(shadow)}
       // Shadow attributes are applied to every drawing call of the scene
@@ -283,11 +497,7 @@ function ImageNode({
 }
 
 export default function ElementRenderer({ element, zoom, onSelect, onGestureEnd, registerNode }: Props) {
-  const syncMeasuredHeight = useEditorStore((s) => s.syncMeasuredHeight);
   const setEditingId = useEditorStore((s) => s.setEditingId);
-  // While the <textarea> overlay is open the Konva node is hidden (so the
-  // text isn't drawn twice) and shown again as soon as editing ends.
-  const isEditing = useEditorStore((s) => s.editingId === element.id);
 
   const nodeRef = useRef<Konva.Node | null>(null);
   const setNode = useCallback(
@@ -298,27 +508,15 @@ export default function ElementRenderer({ element, zoom, onSelect, onGestureEnd,
     [element.id, registerNode]
   );
 
-  const text = element.type === "text" ? element : null;
-  const shown = text ? displayText(text) : "";
-  const fittedSize = useFittedFontSize(
-    // the hook runs for every element; for a non-text element it does nothing
-    text ?? ({ autoFit: false, fontSize: 0 } as TextElement),
-    shown
+  // Blur / colour filter of a shape (text does its own on its group, pictures in ImageNode).
+  const { id: _id, x: _x, y: _y, rotation: _r, zIndex: _z, ...shapeLook } = element;
+  useNodeFilters(
+    nodeRef,
+    element.type === "shape" ? element : { width: 0, height: 0 },
+    zoom,
+    element.type === "shape" ? JSON.stringify(shapeLook) : "",
+    element.type === "shape"
   );
-
-  // A text node has no fixed height: Konva lays the text out and wraps it
-  // inside `width`. Copy the measured height back into the store so exported
-  // JSON carries the real box (this does not create an undo step). An auto-fit
-  // box is the exception: its height is the user's, and the text fits into it.
-  const textLayoutKey = text
-    ? [shown, text.fontSize, text.fontFamily, text.fontStyle, text.lineHeight, text.width, text.letterSpacing, text.autoFit].join("|")
-    : "";
-  useLayoutEffect(() => {
-    if (!text || text.autoFit) return;
-    const node = nodeRef.current;
-    if (node) syncMeasuredHeight(element.id, node.height());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [textLayoutKey, element.id, syncMeasuredHeight]);
 
   const commonProps: CommonKonvaProps = {
     id: element.id,
@@ -340,39 +538,18 @@ export default function ElementRenderer({ element, zoom, onSelect, onGestureEnd,
   };
 
   if (element.type === "text") {
+    // While the <textarea> overlay is open the text is hidden (so it is not
+    // drawn twice) and shown again as soon as editing ends.
     const startEditing = () => {
       onSelect(false);
       setEditingId(element.id);
     };
-    const strokeOn = !!element.stroke && (element.strokeWidth ?? 0) > 0;
-    return (
-      <Text
-        {...commonProps}
-        width={element.width}
-        // auto-fit: a fixed box; otherwise Konva measures the height itself
-        height={element.autoFit ? element.height : undefined}
-        text={shown}
-        fontSize={fittedSize}
-        fontFamily={element.fontFamily}
-        fontStyle={element.fontStyle}
-        lineHeight={element.lineHeight}
-        // stored as a fraction of the font size (like Polotno); Konva wants px
-        letterSpacing={(element.letterSpacing ?? 0) * fittedSize}
-        textDecoration={element.textDecoration ?? ""}
-        fill={element.fill}
-        stroke={strokeOn ? element.stroke : undefined}
-        strokeWidth={strokeOn ? element.strokeWidth : 0}
-        // the outline sits behind the letters, so it never eats into them
-        fillAfterStrokeEnabled
-        align={element.align}
-        visible={!isEditing}
-        onDblClick={startEditing}
-        onDblTap={startEditing}
-      />
-    );
+    return <TextNode element={element} common={commonProps} zoom={zoom} onStartEditing={startEditing} />;
   }
 
   if (element.type === "shape") {
+    const dash = element.strokeWidth > 0 ? sanitizeDash(element.dash) : null;
+    const dashProps = { dash: dash ?? undefined, dashEnabled: dash !== null };
     if (element.shapeType === "circle") {
       // Konva's Ellipse is positioned by its CENTRE. A negative offset of
       // half the size moves the node origin to the bounding box's top-left
@@ -387,6 +564,7 @@ export default function ElementRenderer({ element, zoom, onSelect, onGestureEnd,
           fill={element.fill}
           stroke={element.stroke}
           strokeWidth={element.strokeWidth}
+          {...dashProps}
         />
       );
     }
@@ -399,6 +577,7 @@ export default function ElementRenderer({ element, zoom, onSelect, onGestureEnd,
         stroke={element.stroke}
         strokeWidth={element.strokeWidth}
         cornerRadius={element.cornerRadius}
+        {...dashProps}
       />
     );
   }

@@ -778,9 +778,10 @@ test("adapter: what is still unsupported on a picture is still reported", () => 
   for (const supported of [{ cornerRadius: 12 }, { sepiaEnabled: true }, { grayscaleEnabled: true }, { brightnessEnabled: true, brightness: 0.2 }]) {
     assert.deepEqual(convertOne(supported).warnings, [], JSON.stringify(supported));
   }
-  // blur on TEXT is not supported (only pictures have it; the shadow is, since v4)
+  // blur on TEXT is supported since v5: imported, silent
   const text = convertPolotnoToKusuka(polotno([{ id: "t", type: "text", x: 0, y: 0, width: 100, text: "Hai", fontSize: 20, blurEnabled: true }]));
-  assert.match(text.warnings.join("|"), /efek yang belum didukung/);
+  assert.deepEqual(text.warnings, []);
+  assert.equal(text.document.pages[0].elements[0].blurRadius, 10);
   // an unreadable shadow colour is reported like any other unreadable colour
   const bad = convertOne({ shadowEnabled: true, shadowColor: "linear-gradient(red, blue)", shadowBlur: 4 });
   assert.equal(bad.el.shadowColor, "#000000");

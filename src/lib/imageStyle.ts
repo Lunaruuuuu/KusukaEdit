@@ -20,6 +20,7 @@ import {
   MAX_STROKE_WIDTH,
 } from "@/lib/imageEffects";
 import { parseColor } from "@/lib/color";
+import { sanitizeDash } from "@/lib/textEffects";
 
 export const IMAGE_STYLE_KEYS = [
   "opacity",
@@ -37,6 +38,7 @@ export const IMAGE_STYLE_KEYS = [
   "contrast",
   "saturation",
   "filterPreset",
+  "dash",
 ] as const;
 
 export type ImageStyleKey = (typeof IMAGE_STYLE_KEYS)[number];
@@ -51,6 +53,15 @@ export const SHADOW_KEYS: readonly ImageStyleKey[] = [
   "shadowOpacity",
 ];
 export const COMMON_STYLE_KEYS: readonly ImageStyleKey[] = ["opacity", ...SHADOW_KEYS];
+/** Blur, colour filter and dash: every element type since v5. */
+export const V5_STYLE_KEYS: readonly ImageStyleKey[] = [
+  "blurRadius",
+  "brightness",
+  "contrast",
+  "saturation",
+  "filterPreset",
+  "dash",
+];
 
 /**
  * Which style keys each element type takes. Text and shapes also take a
@@ -58,8 +69,8 @@ export const COMMON_STYLE_KEYS: readonly ImageStyleKey[] = ["opacity", ...SHADOW
  * but never removed (see REQUIRED_KEYS).
  */
 export const STYLE_KEYS_BY_TYPE: Record<ElementType, readonly ImageStyleKey[]> = {
-  text: [...COMMON_STYLE_KEYS, "stroke", "strokeWidth"],
-  shape: [...COMMON_STYLE_KEYS, "stroke", "strokeWidth"],
+  text: [...COMMON_STYLE_KEYS, ...V5_STYLE_KEYS, "stroke", "strokeWidth"],
+  shape: [...COMMON_STYLE_KEYS, ...V5_STYLE_KEYS, "stroke", "strokeWidth"],
   image: IMAGE_STYLE_KEYS,
 };
 const REQUIRED_KEYS: Record<ElementType, readonly ImageStyleKey[]> = {
@@ -111,6 +122,8 @@ function sanitize(key: ImageStyleKey, value: unknown): ImageElement[ImageStyleKe
       return typeof value === "string" && (MASK_SHAPES as readonly string[]).includes(value)
         ? (value as ImageElement["maskShape"]) ?? null
         : null;
+    case "dash":
+      return sanitizeDash(value);
     case "filterPreset":
       return typeof value === "string" && (FILTER_PRESETS as readonly string[]).includes(value)
         ? (value as ImageElement["filterPreset"]) ?? null
@@ -149,7 +162,8 @@ export function applyElementStylePatch<T extends CanvasElement>(el: T, patch: El
     }
     const value = sanitize(key, raw);
     if (value === null) continue;
-    if (next[key] !== value) {
+    const same = Array.isArray(value) ? JSON.stringify(next[key]) === JSON.stringify(value) : next[key] === value;
+    if (!same) {
       next[key] = value;
       changed = true;
     }

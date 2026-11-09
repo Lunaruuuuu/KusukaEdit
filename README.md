@@ -4,8 +4,16 @@ Prototipe / MVP komponen design editor kanvas untuk Next.js, terinspirasi dari
 arsitektur [Polotno](https://polotno.com/). Dibangun dengan **React-Konva**
 untuk rendering kanvas, dan **Zustand** untuk state management.
 
-Status: **MVP kerja praktek, versi 9** (paket `0.9.0`, rilis "KusukaEdit Ver 0.7") — versi
-ini menata ulang **alur masuk dan keluar berkas mengikuti Polotno**: semua jalur masuk
+Status: **MVP kerja praktek, versi 10** (paket `0.10.0`, rilis "KusukaEdit Ver 0.8") — versi
+ini menerjemahkan **efek visual Polotno tanpa peringatan**: blur dan filter warna kini berlaku
+untuk teks dan bentuk, ditambah **garis putus-putus** (`dash`), **latar teks** (kotak per baris
+dengan sudut membulat dan padding yang mengikuti ukuran huruf), dan **teks melengkung**. Semuanya
+masuk skema JSON native **v5**, digambar di kanvas (teks kini sebuah `Group`), diatur dari satu
+popover **✦ Efek**, ikut Undo/Redo, dan ditulis kembali ke Polotno dengan nama propertinya
+sendiri. Font dari berkas atau pemilih font kini **dimuat dari Google Fonts** sebelum teks
+diukur. Ikon perataan teks seragam tiga garis.
+
+Versi 9 (rilis "Ver 0.7") menata ulang **alur masuk dan keluar berkas mengikuti Polotno**: semua jalur masuk
 (proyek JSON dengan **pratinjau deteksi**, gambar, template) dikumpulkan di tab **Impor** di
 panel kiri, sedangkan ekspor (PNG, JPG, JSON KusukaEdit, JSON Polotno) menjadi satu tombol
 **Ekspor** dengan menu di header, tepat di kanan Undo/Redo — panel kanan (`ActionPanel`)
@@ -37,6 +45,8 @@ auto-fit teks; skema JSON native v4.
 - [Pemangkasan (crop) gambar](#pemangkasan-crop-gambar)
 - [Filter & efek gambar](#filter--efek-gambar)
 - [Efek lintas elemen (teks, bentuk, gambar)](#efek-lintas-elemen-teks-bentuk-gambar)
+- [Efek Polotno tanpa peringatan (v10)](#efek-polotno-tanpa-peringatan-v10)
+- [Pemuat font Google (v10)](#pemuat-font-google-v10)
 - [Toolbar kontekstual ala Polotno](#toolbar-kontekstual-ala-polotno)
 - [Seleksi ganda: kotak seret & Ctrl/Cmd+klik](#seleksi-ganda-kotak-seret--ctrlcmdklik)
 - [Auto-fit teks (kecilkan otomatis)](#auto-fit-teks-kecilkan-otomatis)
@@ -44,7 +54,7 @@ auto-fit teks; skema JSON native v4.
 - [Copy & Paste elemen](#copy--paste-elemen-ctrlc--ctrlv)
 - [Undo / Redo](#sistem-undo--redo-history-stack)
 - [Export ke gambar (satu halaman atau semua)](#export-ke-gambar-png--jpg)
-- [Skema JSON native (v4)](#skema-dokumen-json-native-v4)
+- [Skema JSON native (v5)](#skema-dokumen-json-native-v5)
 - [Adapter Polotno (dua arah, semua halaman)](#adapter-polotno-import--export-dua-arah)
 - [Template](#template-galeri-preset)
 - [Keyboard shortcuts](#keyboard-shortcuts)
@@ -153,9 +163,16 @@ auto-fit teks; skema JSON native v4.
 - [x] **Auto-fit teks** (v8): kotak teks bertinggi tetap; ukuran huruf mengecil
       proporsional (kelipatan 0,5 px) sampai tidak ada baris yang keluar dari tinggi kotak
       dan tidak ada kata yang lebih lebar dari kotak, diukur dengan `measureSize` Konva
-- [x] **Test suite** (`npm test`, 253 tes) untuk adapter, store dan halaman, memori
+- [x] **Efek Polotno tanpa peringatan** (v10): blur dan filter warna (kecerahan, kontras,
+      saturasi, preset) untuk teks dan bentuk; **garis putus-putus** untuk bentuk, garis tepi
+      huruf, dan bingkai gambar; **latar teks** per baris (warna, kepekatan, sudut, padding);
+      **teks melengkung** (busur ke atas/bawah); popover **✦ Efek**; pulang-pergi Polotno utuh
+- [x] **Pemuat font Google** (v10): font dimuat lewat `<link>` + `document.fonts.load()`
+      sebelum teks diukur ulang; pemilih font berisi 20 keluarga
+- [x] **Ikon perataan tiga garis** (v10) untuk semua opsi perataan
+- [x] **Test suite** (`npm test`, 266 tes) untuk adapter, store dan halaman, memori
       gambar, ukuran kanvas, zoom, export, ZIP, template, crop, drop, filter, efek gambar,
-      efek lintas elemen, opsi teks, auto-fit, marquee, dan seleksi ganda
+      efek lintas elemen, opsi teks, auto-fit, marquee, seleksi ganda, dan efek v10
 
 ## Struktur Proyek
 
@@ -166,7 +183,7 @@ canvas-editor/
 │   ├── page.tsx                   # Halaman utama, merender <EditorRoot />
 │   └── globals.css
 ├── src/
-│   ├── types/editor.ts            # Skema TypeScript: Page, CanvasDocument (native v4), elemen
+│   ├── types/editor.ts            # Skema TypeScript: Page, CanvasDocument (native v5), elemen
 │   ├── store/
 │   │   ├── useEditorStore.ts      # Zustand: pages + currentPageIndex, history, clipboard, actions, JSON
 │   │   └── selectors.ts           # selectCurrentPage / selectCanvas / selectElements / selectElementById
@@ -187,7 +204,10 @@ canvas-editor/
 │   │   ├── dropImage.ts           # Drag-and-drop: jenis seretan, berkas yang dipakai, kursor -> koordinat desain (murni)
 │   │   ├── imageEffects.ts        # Efek mana yang benar-benar aktif (juga resolveShadow / resolveOpacity untuk semua elemen) + blur Konva (murni)
 │   │   ├── imageStyle.ts          # Patch gaya elemen (gambar, teks, bentuk): validasi, pembatasan, "undefined = hapus" (murni)
-│   │   ├── textOptions.ts         # Opsi teks toolbar: dekorasi, spasi huruf, huruf besar/kecil, daftar, baca dari berkas (murni)
+│   │   ├── textOptions.ts         # Opsi teks toolbar: dekorasi, spasi huruf, huruf besar/kecil, daftar, latar & lengkung dari berkas (murni)
+│   │   ├── textEffects.ts         # v10: dash (+ satuan Polotno), kotak latar teks per baris, geometri busur teks lengkung (murni)
+│   │   ├── fontLoader.ts          # v10: ensureFontLoaded() — Google Fonts <link> + document.fonts.load(), daftar font
+│   │   ├── useNodeFilters.ts      # v10: hook blur + filter warna (cache Konva) untuk teks dan bentuk
 │   │   ├── textFit.ts             # Auto-fit teks: bungkus kata seperti Konva + cari ukuran huruf terbesar yang muat (murni)
 │   │   ├── selection.ts           # Marquee: kotak dari dua titik, perpotongan kotak berotasi (SAT), hasil seleksi (murni)
 │   │   ├── transform.ts           # Transformer -> field elemen ("bake" skala ke lebar/tinggi/ukuran huruf) (murni)
@@ -225,7 +245,8 @@ canvas-editor/
 │       ├── WorkspacePanel.tsx     # Ukuran, rasio, latar kanvas (+ "Terapkan ke semua halaman")
 │       ├── TemplatePanel.tsx      # Kartu template (thumbnail, jumlah halaman, lencana format)
 │       ├── TemplateThumbnail.tsx  # Thumbnail SVG satu halaman (juga dipakai strip halaman)
-│       ├── ContextualToolbar.tsx  # Toolbar satu baris ala Polotno (teks / gambar / bentuk / seleksi ganda) + popover
+│       ├── ContextualToolbar.tsx  # Toolbar satu baris ala Polotno (teks / gambar / bentuk / seleksi ganda) + popover (Efek v10)
+│       ├── DashPicker.tsx         # v10: pilihan pola garis (utuh / putus-putus / garis panjang / titik-titik)
 │       ├── ImageStylePanel.tsx    # Panel Filter | Efek | Bayangan & garis untuk gambar
 │       ├── PageStrip.tsx          # Strip halaman: thumbnail, Tambah, Duplikat, Hapus
 │       ├── HistoryControls.tsx    # Tombol Undo/Redo
@@ -1103,10 +1124,145 @@ Bayangan + warna/blur/geser/kepekatan, dan untuk teks Garis tepi huruf), dan sli
 **Adapter Polotno:** `readPolotnoCommonEffects` / `shadowToPolotno` di
 `lib/polotnoEffects.ts` dipakai untuk **semua** tipe elemen. Bayangan dibaca hanya bila
 `shadowEnabled === true` (aturan yang sama dengan efek gambar), `opacity < 1` disalin, dan
-keduanya **tidak lagi masuk peringatan** "efek yang belum didukung". Yang masih dilaporkan
-untuk teks/bentuk: blur, filter warna (brightness/sepia/grayscale), latar teks
-(`backgroundEnabled`), teks melengkung (`curveEnabled`), garis putus-putus (`dash`),
-dekorasi selain underline/line-through, dan `textTransform` selain upper/lower.
+keduanya **tidak lagi masuk peringatan** "efek yang belum didukung". (Sejak v10 blur, filter
+warna, latar teks, teks melengkung, dan `dash` juga didukung; lihat bagian berikutnya.)
+
+## Efek Polotno tanpa peringatan (v10)
+
+Sampai v9, `convertPolotnoToKusuka()` (`src/lib/polotnoAdapter.ts`) membuang blur dan filter
+warna pada teks/bentuk, latar teks, teks melengkung, dan garis putus-putus ke daftar
+`warnings`. Di v10 semuanya punya tempat di skema (native **v5**), digambar di kanvas, bisa
+diatur dari toolbar, dan ditulis kembali ke Polotno.
+
+### Field baru (`src/types/editor.ts`)
+
+| Field | Di | Arti | Polotno |
+|---|---|---|---|
+| `blurRadius` | semua elemen (sebelumnya hanya gambar) | blur px | `blurEnabled` + `blurRadius` |
+| `brightness` / `contrast` / `saturation` | semua elemen | −100..100 | `brightnessEnabled` + `brightness` (×100), `filters.contrast/saturation.intensity` (×100) |
+| `filterPreset` | semua elemen | hitam-putih, sepia, dll. | `grayscaleEnabled` / `sepiaEnabled`; preset lain di `custom.filterPreset` |
+| `dash` | semua elemen | pola garis tepi dalam px desain, mis. `[10, 5]`; tidak ada = garis utuh | bentuk: `dash` (lihat di bawah); teks/gambar: `custom.dash` (Polotno tidak punya) |
+| `backgroundEnabled`, `backgroundColor`, `backgroundOpacity`, `backgroundCornerRadius`, `backgroundPadding` | teks | kotak latar di belakang teks | nama yang sama persis |
+| `curveEnabled`, `curvePower` | teks | teks pada satu busur, −1..1 (positif melengkung ke atas) | nama yang sama persis |
+
+Semua field opsional: berkas v4 adalah berkas v5 yang sah dan dimuat tanpa peringatan.
+
+### Satuan yang dicocokkan dengan kode Polotno
+
+Angka-angka berikut diambil dari kode kanvas Polotno yang terbit di npm
+(`polotno/canvas/text-element.js`, `figure-element.js`), bukan ditebak:
+
+- **Padding dan sudut latar teks** adalah **pecahan dari setengah baris**:
+  `px = nilai × fontSize × lineHeight × 0,5` (`resolveTextBackground()` di
+  `lib/textEffects.ts`). Bawaan Polotno 0,5 / 0,5 dan warna `#7ED321`. Kotak ikut membesar
+  bila huruf membesar; untuk teks auto-fit dipakai ukuran huruf yang **digambar**.
+- **Dash bentuk** di Polotno adalah **kelipatan tebal garis** yang digambar,
+  `F = min(strokeWidth, width/2, height/2)`. Editor ini menyimpan dash dalam px (yang
+  dipakai Konva), jadi adapter membagi/mengalikan dengan `F`
+  (`dashToPolotno` / `dashFromPolotno`). Contoh: Polotno `[2, 1]` dengan garis 4 px →
+  `[8, 4]` di sini → kembali `[2, 1]`.
+- **Bayangan teks berlatar** dijatuhkan oleh kotak latarnya, tanpa latar oleh hurufnya
+  (seperti Polotno saat latar menyala).
+- **Teks melengkung:** rumus busur Polotno ada di modul `@polotno/core` yang tidak bisa
+  dibaca, jadi busur di sini rumus sendiri (lihat "Belum diuji"): `|curvePower| = 1` berarti
+  0,95 lingkaran, panjang busur = lebar teks terukur × 1,08 + ½ ukuran huruf (TextPath Konva
+  mengukur per huruf dan **membuang huruf yang tidak muat**; tanpa kelonggaran huruf
+  terakhir hilang), teks di tengah busur dan busur di tengah kotak.
+
+### Yang masih dilaporkan
+
+Hanya yang memang belum ada padanannya: dekorasi `overline`, `textTransform:
+"capitalize"`, mask dari gambar (`maskSrc`), filter selain kontras/saturasi di objek
+`filters`, dan (di luar efek) grup, bentuk selain persegi/lingkaran, latar halaman berupa
+gambar/gradien, warna yang tidak terbaca. Contoh `fancyPolotno()` di
+`tests/v5-effects-text.test.ts` memakai semua efek di atas sekaligus dan menghasilkan
+**`warnings: []`**.
+
+### Cara digambar (`ElementRenderer.tsx`)
+
+- **Teks = `Group`** berisi (1) kotak latar opsional dan (2) `Konva.Text`, atau
+  `Konva.TextPath` di atas busur untuk teks melengkung. **Group** itulah node yang diseret,
+  di-Transform, difilter, dan didaftarkan ke Transformer, jadi latar, huruf, dan efeknya
+  bergerak sebagai satu. `bakeTransform` tetap sama karena Group punya `x/y/rotation/scale`.
+- **Kotak latar** adalah `Shape` **tanpa ukuran sendiri**: ia menggambar kotaknya di
+  `sceneFunc`. Bingkai Transformer dihitung dari ukuran anak-anak Group, jadi bingkai tetap
+  persis kotak teks dan padding tumbuh ke luar (seperti Polotno), sementara kotaknya tetap
+  bisa diklik lewat `hitFunc`. Kotak dibuat **per baris** dari `textArr` Konva
+  (`backgroundLineBoxes()`): baris pendek mendapat kotak pendek, mengikuti `align`; semua
+  kotak satu *path* dan diisi sekali, jadi tumpang-tindihnya tidak lebih gelap.
+- **Dash**: `dash` + `dashEnabled` di `Rect`/`Ellipse`, di garis tepi huruf (`Konva.Text`
+  dan `TextPath`), dan di bingkai gambar (`strokeShape` di `drawPicture` memakai atribut
+  `dash` node).
+- **Blur & filter warna** pada teks dan bentuk: hook `useNodeFilters`
+  (`lib/useNodeFilters.ts`) men-*cache* node (Group teks / node bentuk), memasang
+  `Konva.Filters.Blur` dan filter matriks warna yang sama dengan gambar (`filterToMatrix` →
+  `applyColorMatrix`), dan men-*cache* ulang setiap kali tampilan elemen berubah (cache Konva
+  adalah potret). Gambar tetap memakai jalurnya sendiri.
+
+### Mengubahnya: popover **✦ Efek** (`ContextualToolbar.tsx`)
+
+Teks dan bentuk punya satu popover Efek (bisa digulir) dengan bagian:
+
+| Bagian | Teks | Bentuk |
+|---|---|---|
+| Transparansi | ✔ | ✔ |
+| Garis tepi + **Pola garis** (Utuh / Putus-putus 10,5 / Garis panjang 20,8 / Titik-titik 2,4) | garis tepi huruf | tebal, pola, dan **sudut** (persegi) |
+| **Latar teks**: sakelar + warna, kepekatan, sudut (%), jarak/padding (%) | ✔ | – |
+| **Teks lengkung**: sakelar + lengkungan −100..100 % | ✔ | – |
+| Bayangan: warna, blur, geser X/Y, kepekatan | ✔ | ✔ |
+| **Blur & filter warna**: blur, kecerahan, kontras, saturasi, preset | ✔ | ✔ |
+
+Gambar mendapat **Pola garis** di panel Filter & Efek (di bawah "Tebal garis"). Field gaya
+lewat `setElementStyle` (divalidasi; `dash` diperiksa `sanitizeDash`), field khusus teks
+lewat `updateElement`; keduanya memakai history ber-*debounce*, jadi satu geseran slider =
+satu langkah undo, dan Undo/Redo mengembalikannya persis (diuji).
+
+Perbaikan kecil di toolbar yang sama:
+
+- **Ikon perataan** kini selalu **tiga garis** untuk kiri, tengah, kanan, dan rata
+  kiri-kanan. Sebelumnya, pada "tengah" dan "kanan" dua garis tanpa lebar sendiri menyusut
+  menjadi 0 px di dalam flex, jadi yang terlihat hanya satu garis.
+- **Popover di tepi toolbar** tidak lagi langsung menutup. Klik pada tombol di tepi kanan
+  menggulir toolbar, dan dulu setiap gulir menutup popover. Sekarang panel mengikuti tombolnya
+  dan baru menutup bila tombolnya keluar dari bagian toolbar yang terlihat.
+
+### Ekspor ke Polotno (`convertKusukaToPolotno()`)
+
+Efek yang menyala ditulis dengan nama properti Polotno (`backgroundEnabled`…,
+`curveEnabled`/`curvePower`, `blurEnabled`/`blurRadius`, `brightnessEnabled`,
+`grayscaleEnabled`/`sepiaEnabled`, `filters`, `dash` bentuk dalam kelipatan garis). Yang
+tidak dimiliki Polotno (dash teks/gambar, preset selain hitam-putih/sepia) masuk `custom`
+dan kembali utuh saat diimpor lagi. Uji pulang-pergi Polotno → KusukaEdit → Polotno →
+KusukaEdit menghasilkan dokumen yang **identik**. Apakah Polotno sendiri menampilkannya
+**sama persis** belum bisa dipastikan tanpa membuka berkasnya di Polotno (lihat "Belum diuji").
+
+## Pemuat font Google (v10)
+
+`src/lib/fontLoader.ts` — `ensureFontLoaded(fontFamily)`:
+
+1. Mengambil keluarga pertama dari *font stack* (`"'Open Sans', sans-serif"` → `Open Sans`);
+   font sistem/generik (Arial, Georgia, Times New Roman, Verdana, `sans-serif`…) dilewati.
+2. Menyisipkan **satu** `<link rel="stylesheet">` Google Fonts (API css2, regular/bold/
+   italic/bold italic) ke `<head>`. Bila Google menolak karena keluarganya tidak punya salah
+   satu gaya itu (mis. Bebas Neue tanpa italic → HTTP 400), dicoba lagi dengan keluarga saja.
+3. Menunggu `document.fonts.load()` untuk bobot yang digambar editor.
+4. Menaikkan nomor versi font; setiap teks berlangganan (`useSyncExternalStore`), menyusun
+   ulang barisnya dengan metrik asli (`_setTextData()` Konva, karena Konva tidak mengukur
+   ulang sendiri), menyinkronkan tinggi kotak, lalu `layer.batchDraw()`.
+
+Dipanggil oleh setiap teks saat dirender dan saat `fontFamily`-nya berubah. Itu mencakup
+impor JSON Polotno/native, template, dan pemilih font, tanpa daftar terpisah. Satu
+keluarga dimuat sekali per halaman; panggilan bersamaan berbagi satu *promise*. Di Node/SSR
+fungsi ini langsung selesai dengan `false`.
+
+**Pemilih font** di toolbar kini berisi 20 keluarga (`FONT_CHOICES`): Inter, Roboto, Open
+Sans, Montserrat, Poppins, Lato, Oswald, Bebas Neue, Anton, Playfair Display, Merriweather,
+Lora, Pacifico, Dancing Script, Lobster, Roboto Mono, ditambah Georgia, Courier New, Times
+New Roman, dan Verdana. Font lain dari berkas impor tetap muncul di daftar dan ikut dimuat.
+
+**Toleransi lebar teks** (`TEXT_WIDTH_TOLERANCE`, +10 px untuk teks dari Polotno) tetap ada.
+Font yang benar sudah menghilangkan penyebab utama "SALE" turun baris, tetapi toleransi tetap
+berguna bila font gagal dimuat (luring, keluarga tidak ada di Google Fonts).
 
 ## Toolbar kontekstual ala Polotno
 
@@ -1448,7 +1604,13 @@ gagal), dan export paralel (satu Stage = satu halaman sekali waktu).
 
 ---
 
-## Skema Dokumen JSON Native (v4)
+## Skema Dokumen JSON Native (v5)
+
+> **v5 (v10 editor):** hanya menambah field opsional — `blurRadius`, `brightness`,
+> `contrast`, `saturation`, `filterPreset`, dan `dash` di semua elemen, serta
+> `background*` dan `curve*` di teks (lihat
+> [Efek Polotno tanpa peringatan](#efek-polotno-tanpa-peringatan-v10)). Berkas v4 dibaca
+> apa adanya; contoh di bawah tetap berlaku dengan `"version": 5`.
 
 Format bawaan (`exportToJSON("kusuka")`), didefinisikan di `src/types/editor.ts`.
 **Satu berkas memuat seluruh halaman.**
@@ -1460,7 +1622,7 @@ halaman tempat elemen berada.
 
 ```jsonc
 {
-  "version": 4,                 // versi skema (lihat "Migrasi")
+  "version": 5,                 // versi skema (lihat "Migrasi")
   "pages": [
     {
       "id": "page-1",           // unik di seluruh dokumen
@@ -1547,9 +1709,14 @@ Contoh lengkap: [`examples/sample-design.json`](./examples/sample-design.json) (
 dan [`examples/sample-multipage.json`](./examples/sample-multipage.json) (tiga halaman,
 dua ukuran berbeda).
 
-### Migrasi v1 → v2 → v3 → v4
+### Migrasi v1 → v2 → v3 → v4 → v5
 
-- **v4** (sekarang): bentuk sama dengan v3; yang baru hanya field **opsional** —
+- **v5** (sekarang): bentuk sama dengan v4; yang baru hanya field **opsional** —
+  `blurRadius`, `brightness`, `contrast`, `saturation`, `filterPreset`, `dash` pada semua tipe
+  elemen, serta `backgroundEnabled`/`backgroundColor`/`backgroundOpacity`/
+  `backgroundCornerRadius`/`backgroundPadding` dan `curveEnabled`/`curvePower` pada teks.
+  Berkas v4 dibuka apa adanya, tanpa peringatan; berkas versi 6 ke atas ditolak.
+- **v4**: bentuk sama dengan v3; yang baru hanya field **opsional** —
   `opacity` dan `shadow*` pada semua tipe elemen, serta `stroke`/`strokeWidth`,
   `textDecoration`, `letterSpacing`, `textTransform`, `listType`, `autoFit`, dan
   `align: "justify"` pada teks.
@@ -2112,7 +2279,7 @@ npm install
 npm test
 ```
 
-`npm test` menjalankan **sembilan berkas** di `tests/` lewat [`tsx`](https://tsx.is/)
+`npm test` menjalankan **sepuluh berkas** di `tests/` lewat [`tsx`](https://tsx.is/)
 (devDependency), **tanpa browser dan tanpa Next.js** — butuh Node 20+ (memakai
 `Blob`, `URL.createObjectURL`, dan `fetch(blob:)` bawaan Node; diuji pada Node 22). Zustand dan uuid
 diganti stub tipis di `tests/stubs/` lewat `tests/tsconfig.json`, dengan kontrak
@@ -2122,7 +2289,7 @@ diganti stub tipis di `tests/stubs/` lewat `tests/tsconfig.json`, dengan kontrak
 
 | Berkas | Isi | Jumlah |
 |---|---|---|
-| `tests/core.test.ts` | warna, font, deteksi format (native v1/v2/v3 vs Polotno), adapter dua arah, **migrasi v1 → v2 → v3** (v2 menjadi satu halaman tanpa peringatan, v3 dibaca sebagai v4, versi 5 ditolak), `parseDocument`, store (history, clipboard, JSON, `editingId`) | 22 |
+| `tests/core.test.ts` | warna, font, deteksi format (native v1/v2/v3 vs Polotno), adapter dua arah, **migrasi v1 → v2 → v3** (v2 menjadi satu halaman tanpa peringatan, v3 dibaca sebagai v5, versi 6 ditolak), `parseDocument`, store (history, clipboard, JSON, `editingId`) | 22 |
 | `tests/media-workspace.test.ts` | aturan ukuran kanvas & rencana export, pencatat URL objek, `addImageElement`/`replaceImageSource`, **revoke berbasis referensi** (hapus, ganti, Undo, pemangkasan history, clipboard — kini menelusuri semua halaman), gestur gambar = satu langkah undo, `setCanvasMeta`, penyematan `blob:` → `data:` saat export (semua halaman), adapter (struktur bertingkat, `pageIndex`, **tanpa `pageIndex` setiap halaman diimpor dengan ukurannya sendiri**, `color`/`fill`, titik jangkar, crop, gambar, grup) | 28 |
 | `tests/templates.test.ts` | registry (id unik, 7 template Polotno ada), **tiap template**: termuat **tanpa peringatan**, warna `#rrggbb`, id/zIndex unik per halaman dan id unik di seluruh dokumen, native ↔ Polotno tanpa kehilangan data; jumlah halaman dan ukuran per halaman tiap berkas Polotno; efek gambar Katalog produk; contoh satu dan tiga halaman | 28 |
 | `tests/image-tools.test.ts` | **crop** (pecahan → piksel asli; tepi/sudut; batas gambar dan ukuran minimal; gambar dirotasi dan dicerminkan; geser; reset; *property test* 400 putaran: skala gambar tetap dan piksel yang terlihat tetap di tempatnya), **drop** (hanya seretan berkas, `files[0]`, kursor → koordinat desain pada berbagai zoom, drop di luar kanvas), store (`addImageElement` dengan `at`, `setImageCrop` = satu langkah undo, `resetImageCrop`, `croppingId` mengikuti pilihan), **efek** (hanya efek yang terlihat yang aktif, konfigurasi blur/cache, urutan `cache → filters → blurRadius`), `drawPicture` dengan mask/garis/bayangan (urutan panggilan konteks), deteksi mask, `colorAlpha`, adapter (blur, border, shadow, SVG, mask dikenali/tidak dikenali, peringatan yang tersisa, pulang-pergi), validasi file native, dan contoh `sample-effects.polotno.json` tanpa peringatan | 41 |
@@ -2130,9 +2297,10 @@ diganti stub tipis di `tests/stubs/` lewat `tests/tsconfig.json`, dengan kontrak
 | `tests/pages.test.ts` | **halaman**: `createBlankPage`, `duplicatePageData` (id baru untuk halaman dan semua elemen), indeks (jepit, validasi, setelah hapus), selectors; store — satu halaman awal, `addPage` (setelah halaman aktif, ukuran diwariskan), `duplicatePage` (id baru, indeks buruk tidak mencatat history), `deletePage` (halaman terakhir dilindungi, undo), **`goToPage` menyetel ulang seleksi/edit/crop**, aksi elemen hanya menyentuh halaman aktif, clipboard lintas halaman, **gestur di halaman 2 tetap satu langkah undo dan Undo membawa kembali ke halaman 2**, `setCanvasMeta` (`allPages`), export/load JSON semua halaman (native dan Polotno), berkas buruk tidak mengubah apa pun; adapter — dokumen banyak halaman pulang-pergi, ukuran halaman `"auto"` vs angka, urutan tumpukan per halaman, **seluruh halaman diimpor**, id unik antarhalaman, `pages` kosong, latar gambar, deteksi v3, migrasi v1/v2 → v3, versi lebih baru ditolak, idempotensi v3 | 37 |
 | `tests/v4-effects-selection.test.ts` | **v8**: `resolveOpacity`/`resolveShadow`; `applyElementStylePatch` per tipe (kunci gambar diabaikan pada teks, garis tepi bentuk tidak bisa dihapus, objek sama = tanpa langkah undo); opsi teks (dekorasi, `displayText` dengan huruf besar/kecil dan penomoran, `readTextOptions` native vs `custom` Polotno, nilai buruk dibuang); **adapter**: opacity dan bayangan teks/bentuk disalin tanpa peringatan, bayangan mati tidak dibaca, stroke/spasi/underline/case/justify teks disalin, yang masih tak didukung tetap dilaporkan, **semua field v4 pulang-pergi tanpa kehilangan**, validasi berkas native v4; **auto-fit** (bungkus kata, kata kepanjangan, ukuran terbesar yang muat pada kelipatan 0,5, batas bawah, spasi huruf proporsional); **marquee** (arah seret, kotak berotasi diuji tepat, menyentuh = kena, mode menambah); `bakeTransform`; `fitElementToPage`; **store**: `setSelection`/`toggleSelected`, seleksi ganda digeser dan dihapus sebagai satu langkah undo, `updateElements`, `undefined` menghapus field, seleksi direset oleh pindah halaman/Undo/elemen baru, `setElementStyle`, `flipImage`, `fitToPage` | 23 |
 | `tests/ui-flow.test.ts` | **v9**: `scaleCropPicture` (memperbesar dari sudut, rasio tetap, kotak tidak bergerak, sudut seberang diam; tidak pernah lebih kecil dari jendela dari sudut mana pun; batas 20×; gambar tercermin), `previewImport` (format, halaman, elemen, label ukuran, store tidak tersentuh, berkas Polotno 2 halaman, berkas rusak/tidak dikenal), pilihan ekspor (`EXPORT_CHOICES`, `jsonFormatOf`, `isExportChoice`, nama berkas) | 6 |
+| `tests/v5-effects-text.test.ts` | **v10**: `sanitizeDash`, satuan dash Polotno (`min(strokeWidth, w/2, h/2)`, dua arah), `resolveTextBackground` (pecahan setengah baris, bawaan Polotno, mati/tidak terlihat), kotak latar per baris (center/right/justify, baris kosong), `curveLayout` (panjang busur + kelonggaran, ke atas/bawah, simetris, tidak pernah lingkaran penuh), **impor Polotno semua efek dengan `warnings: []`**, **ekspor dengan nama Polotno + pulang-pergi identik**, dash teks/gambar di `custom`, yang masih dilaporkan (overline), validasi berkas native v5, **store**: dash/blur/filter lewat `setElementStyle` = satu langkah undo, Undo/Redo latar & lengkung, ekspor JSON native/Polotno memuatnya; pemuat font (nama keluarga, font sistem, URL Google Fonts, Node → `false`) | 13 |
 | `tests/filters-export.test.ts` | **filter**: matriks identitas, kecerahan/kontras/saturasi angka demi angka, preset lebih dulu lalu slider, `multiplyMatrices`, `filterKey` dan batas ukuran salinan; `cornerRadius` dan filter di `resolveImageEffects`; `applyImageStylePatch` (jepit, bulatkan, abaikan nilai buruk, objek sama = tanpa langkah undo, `undefined` menghapus); `setImageStyle` (satu geseran = satu langkah undo, hanya gambar di halaman aktif); `drawPicture` dengan sudut membulat (urutan klip, jari-jari dijepit, bayangan di luar bentuk, area klik); **Polotno** (`brightness`, `filters.contrast/saturation`, hitam-putih/sepia, filter tak dikenal dilaporkan sekali, preset di `custom`, `cornerRadius` di bawah mask tetap ditulis, pulang-pergi); validasi file native; **ZIP** (`crc32` nilai standar, `dataUrlToBytes`, struktur arsip, arsip kosong, cap waktu DOS); **batch** (urutan render, progres, halaman awal dipulihkan, galat dilempar setelah dipulihkan, nama berkas bernomor, `waitUntil`) | 33 |
 
-Total **253 tes** (22 + 28 + 28 + 41 + 35 + 37 + 33 + 23 + 6); semuanya lulus pada saat README
+Total **266 tes** (22 + 28 + 28 + 41 + 35 + 37 + 33 + 23 + 6 + 13); semuanya lulus pada saat README
 ini ditulis (Node 24 di container `node:24-slim`, karena mesin pengembangan v8 tidak punya
 Node terpasang). `npx tsc --noEmit` juga bersih.
 
@@ -2142,6 +2310,29 @@ folder `node_modules/` di proyek tidak disentuh):
 ```bash
 docker run --rm -v "$PWD:/app" -v kusuka_nm:/app/node_modules -w /app node:24-slim sh -c "npm install && npm test && npx tsc --noEmit"
 ```
+
+### Diuji di browser dengan Konva asli (v10)
+
+`next dev` di container `node:24-slim` (port 3001), Chromium, jendela ±1020 px:
+
+- **Impor Polotno** berisi teks berlatar + bayangan (Bebas Neue), dua teks melengkung (Pacifico
+  ke atas, Montserrat tebal ke bawah), teks dua baris berlatar (Poppins), persegi `dash [3, 2]`
+  garis 6 px, lingkaran ber-blur, dan teks hitam-putih: pratinjau impor **tanpa peringatan**;
+  keempat `<link>` Google Fonts disisipkan dan `document.fonts.check()` benar untuk keempat
+  keluarga; semua efek tampil di kanvas.
+- Teks lengkung awalnya kehilangan huruf terakhir ("ke ata", "ke bawa"); setelah busur diberi
+  kelonggaran (lihat di atas) teksnya utuh.
+- Latar teks dua baris: kotak per baris mengikuti panjang baris; bingkai Transformer tetap kotak
+  teks; **diseret** dengan mouse (Group 140,300 → 239,418, latar ikut); **jangkar kanan
+  ditarik** → lebar teks 430 → 647 px, skala Group kembali 1, latar tetap per baris.
+- **Ikon perataan** diukur di DOM pada keempat perataan: selalu tiga garis (14/9/11 px; rata
+  kiri-kanan 14/14/14), digeser kiri/tengah/kanan.
+- **Popover ✦ Efek** dibuka dari toolbar. Saklar **Teks lengkung** diklik dengan mouse → "SALE
+  50%" melengkung dengan kotak latar di sekeliling busur; **Undo** → kembali lurus; **Redo** →
+  melengkung lagi. **Pola garis** persegi (terbaca "Khusus (18, 12)" = 3,2 × 6 px) diganti ke
+  Titik-titik → node `Rect` `dash [2, 4]`.
+- `stage.toDataURL({ pixelRatio: 2 })` dengan node ber-cache/filter berhasil; tidak ada galat di
+  konsol.
 
 ### Diuji di browser dengan Konva asli (v9)
 
@@ -2304,6 +2495,24 @@ dibaca dari halaman aktif.
 
 ### Belum diuji
 
+- **Fitur v10 yang belum diperiksa:**
+  1. Berkas hasil ekspor **belum dibuka di Polotno sungguhan**. Nama properti dan satuan latar
+     teks serta dash bentuk dicocokkan dengan kode kanvas Polotno, dan pulang-pergi di editor ini
+     identik. Tetapi **bentuk busur teks melengkung pasti sedikit berbeda**, karena rumus busur
+     Polotno tidak bisa dibaca. Jadi klaim "100 % presisi di Polotno" belum bisa dibuktikan.
+  2. `lineHeight` yang dipakai Polotno untuk latar teks melalui `resolveLineHeight()` (modul
+     yang tidak terbaca); di sini dipakai `lineHeight` elemen apa adanya.
+  3. Teks melengkung selalu **satu baris** (paragraf digabung dengan spasi), dan kotak teksnya
+     tidak menyesuaikan lebar busur. Mengedit teks melengkung (klik dua kali) memakai textarea
+     lurus.
+  4. Blur/filter pada teks dan bentuk memakai *cache* Konva. Saat jangkar Transformer ditarik,
+     yang terlihat adalah bitmap lama yang diskalakan sampai gestur selesai. Ekspor PNG pada
+     resolusi 3× belum dibandingkan ketajamannya.
+  5. Pemuat font butuh internet (fonts.googleapis.com). Bila luring, teks tetap memakai font
+     cadangan, tanpa pesan. Keluarga yang tidak ada di Google Fonts juga diam-diam memakai
+     cadangan.
+  6. Tombol **Unduh** di menu Ekspor tetap tidak ditekan; ekspor JSON Polotno/native diuji lewat
+     store di tes.
 - **Fitur v9 yang belum diperiksa:**
   1. Tombol **Unduh** di menu Ekspor tidak ditekan di browser selama pengujian v9 (agar
      tidak mengunduh berkas); fungsi ekspornya sama dengan v8, hanya dipanggil dari tempat lain.

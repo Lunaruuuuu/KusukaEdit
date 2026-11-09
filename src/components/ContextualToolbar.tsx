@@ -15,17 +15,29 @@ import type {
 import { toInputColor } from "@/lib/color";
 import { prepareImageFile } from "@/lib/imageUpload";
 import { isWholePicture } from "@/lib/crop";
-import { MAX_SHADOW_BLUR, MAX_SHADOW_OFFSET, MAX_STROKE_WIDTH, resolveOpacity } from "@/lib/imageEffects";
-import { clearPatch, SHADOW_KEYS, type ElementStylePatch } from "@/lib/imageStyle";
+import {
+  FILTER_LIMIT,
+  FILTER_PRESETS,
+  MAX_SHADOW_BLUR,
+  MAX_SHADOW_OFFSET,
+  MAX_STROKE_WIDTH,
+  resolveOpacity,
+} from "@/lib/imageEffects";
+import { clearPatch, FILTER_KEYS, SHADOW_KEYS, type ElementStylePatch } from "@/lib/imageStyle";
 import { MAX_LETTER_SPACING, MIN_LETTER_SPACING, toggleTextDecoration } from "@/lib/textOptions";
+import {
+  DEFAULT_BACKGROUND_PADDING,
+  DEFAULT_BACKGROUND_RADIUS,
+  POLOTNO_BACKGROUND_COLOR,
+} from "@/lib/textEffects";
+import { FONT_CHOICES } from "@/lib/fontLoader";
+import DashPicker from "@/components/DashPicker";
+import { PRESET_LABEL } from "@/components/ImageStylePanel";
+import type { FilterPreset } from "@/types/editor";
 
-const FONT_FAMILIES = [
-  "Inter, sans-serif",
-  "Georgia, serif",
-  "'Courier New', monospace",
-  "'Times New Roman', serif",
-  "Verdana, sans-serif",
-];
+// Every family offered is a Google Font (loaded on first use, see
+// lib/fontLoader.ts) or a font every system has.
+const FONT_FAMILIES: readonly string[] = FONT_CHOICES;
 
 const fontLabel = (stack: string): string => stack.split(",")[0].replace(/'/g, "").trim();
 
@@ -129,8 +141,23 @@ function Popover({
       panel.style.top = `${r.bottom + 6}px`;
     };
     place();
+    // A scrolled toolbar moves the button: the panel follows it. Clicking a
+    // button at the toolbar's edge scrolls it into view, so closing on every
+    // scroll would close the panel the user just opened; it closes only when
+    // the button has left the toolbar's visible part.
+    const toolbar = rootRef.current?.closest(".toolbar");
+    const onScroll = () => {
+      const button = buttonRef.current?.getBoundingClientRect();
+      const bar = toolbar?.getBoundingClientRect();
+      if (button && bar && (button.right < bar.left || button.left > bar.right)) setOpen(false);
+      else place();
+    };
     window.addEventListener("resize", place);
-    return () => window.removeEventListener("resize", place);
+    toolbar?.addEventListener("scroll", onScroll);
+    return () => {
+      window.removeEventListener("resize", place);
+      toolbar?.removeEventListener("scroll", onScroll);
+    };
   }, [open]);
 
   useEffect(() => {
@@ -138,17 +165,12 @@ function Popover({
     const onDown = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
-    // The button moves when the toolbar is scrolled: the panel would be left behind.
-    const toolbar = rootRef.current?.closest(".toolbar");
-    const onScroll = () => setOpen(false);
-    toolbar?.addEventListener("scroll", onScroll);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
     window.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
     return () => {
-      toolbar?.removeEventListener("scroll", onScroll);
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
     };
@@ -268,20 +290,35 @@ function Slider({
 // ---------------------------------- effects -----------------------------------
 
 /**
- * Opacity, drop shadow and (for text) the letter outline of a text or shape.
- * Every control writes through setElementStyle(), so a slider drag is one
- * undo step and the values are saved in the element's JSON.
+ * The Effects popover of a text or a shape: opacity, drop shadow, the border
+ * and its dash pattern, blur and colour filter, and for text the background
+ * box and the curve; for a rectangle the corner radius. Style fields go
+ * through setElementStyle() (validated, one undo step per slider drag), the
+ * text-only fields through updateElement() (also one undo step per drag);
+ * everything is saved in the element's JSON and written to Polotno files.
  */
 function EffectsPopover({ el }: { el: TextElement | ShapeElement }) {
   const setElementStyle = useEditorStore((s) => s.setElementStyle);
+  const updateElement = useEditorStore((s) => s.updateElement);
   const set = (patch: ElementStylePatch) => setElementStyle(el.id, patch);
+  const update = (attrs: Partial<TextElement> | Partial<ShapeElement>) =>
+    updateElement(el.id, attrs as Partial<CanvasElement>);
   const opacity = Math.round(resolveOpacity(el) * 100);
   const shadowOn = el.shadowColor !== undefined;
   const outlineOn = el.type === "text" && !!el.stroke && (el.strokeWidth ?? 0) > 0;
-  const anyOn = opacity < 100 || shadowOn || outlineOn;
+  const borderOn = el.type === "text" ? outlineOn : el.strokeWidth > 0;
+  const filterOn = (el.blurRadius ?? 0) > 0 || FILTER_KEYS.some((k) => el[k as keyof typeof el] !== undefined);
+  const backgroundOn = el.type === "text" && el.backgroundEnabled === true;
+  const curveOn = el.type === "text" && el.curveEnabled === true;
+  const anyOn = opacity < 100 || shadowOn || outlineOn || filterOn || backgroundOn || curveOn || !!el.dash;
 
   return (
-    <Popover label="✦ Efek" title="Efek: transparansi, bayangan, garis tepi" action="effects" active={anyOn}>
+    <Popover
+      label="✦ Efek"
+      title="Efek: transparansi, bayangan, garis tepi dan pola garis, blur dan filter warna, latar teks, teks lengkung"
+      action="effects"
+      active={anyOn}
+    >
       <div className="popover__section">
         <Slider
           label="Transparansi"
@@ -323,6 +360,117 @@ function EffectsPopover({ el }: { el: TextElement | ShapeElement }) {
             unit=" px"
             disabled={!outlineOn}
             onChange={(v) => set({ strokeWidth: v })}
+          />
+          <DashPicker value={el.dash} disabled={!outlineOn} onChange={(dash) => set({ dash })} />
+        </div>
+      )}
+
+      {el.type === "shape" && (
+        <div className="popover__section">
+          <span className="popover__heading">Garis tepi</span>
+          <Slider
+            label="Tebal"
+            name="strokeWidth"
+            value={el.strokeWidth}
+            min={0}
+            max={MAX_STROKE_WIDTH / 2}
+            unit=" px"
+            onChange={(v) => set({ strokeWidth: v })}
+          />
+          <DashPicker value={el.dash} disabled={!borderOn} onChange={(dash) => set({ dash })} />
+          {el.shapeType === "rect" && (
+            <Slider
+              label="Sudut"
+              name="cornerRadius"
+              value={el.cornerRadius}
+              min={0}
+              max={Math.max(1, Math.floor(Math.min(el.width, el.height) / 2))}
+              unit=" px"
+              onChange={(v) => update({ cornerRadius: v })}
+            />
+          )}
+        </div>
+      )}
+
+      {el.type === "text" && (
+        <div className="popover__section" data-effects-section="background">
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={backgroundOn}
+              data-style-control="background-toggle"
+              onChange={(e) =>
+                update(
+                  e.target.checked
+                    ? { backgroundEnabled: true, backgroundColor: el.backgroundColor ?? POLOTNO_BACKGROUND_COLOR }
+                    : { backgroundEnabled: undefined }
+                )
+              }
+            />
+            <span>Latar teks</span>
+            <input
+              type="color"
+              aria-label="Warna latar teks"
+              disabled={!backgroundOn}
+              value={toInputColor(el.backgroundColor ?? POLOTNO_BACKGROUND_COLOR)}
+              onChange={(e) => update({ backgroundColor: e.target.value })}
+            />
+          </label>
+          <Slider
+            label="Kepekatan"
+            name="backgroundOpacity"
+            value={Math.round((el.backgroundOpacity ?? 1) * 100)}
+            min={0}
+            max={100}
+            unit="%"
+            disabled={!backgroundOn}
+            onChange={(v) => update({ backgroundOpacity: v >= 100 ? undefined : v / 100 })}
+          />
+          <Slider
+            label="Sudut"
+            name="backgroundCornerRadius"
+            value={Math.round((el.backgroundCornerRadius ?? DEFAULT_BACKGROUND_RADIUS) * 100)}
+            min={0}
+            max={100}
+            unit="%"
+            disabled={!backgroundOn}
+            onChange={(v) => update({ backgroundCornerRadius: v / 100 })}
+          />
+          <Slider
+            label="Jarak (padding)"
+            name="backgroundPadding"
+            value={Math.round((el.backgroundPadding ?? DEFAULT_BACKGROUND_PADDING) * 100)}
+            min={0}
+            max={200}
+            unit="%"
+            disabled={!backgroundOn}
+            onChange={(v) => update({ backgroundPadding: v / 100 })}
+          />
+        </div>
+      )}
+
+      {el.type === "text" && (
+        <div className="popover__section" data-effects-section="curve">
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={curveOn}
+              data-style-control="curve-toggle"
+              onChange={(e) =>
+                update(e.target.checked ? { curveEnabled: true, curvePower: el.curvePower ?? 0.5 } : { curveEnabled: undefined })
+              }
+            />
+            <span>Teks lengkung</span>
+          </label>
+          <Slider
+            label="Lengkungan"
+            name="curvePower"
+            value={Math.round((el.curvePower ?? 0.5) * 100)}
+            min={-100}
+            max={100}
+            unit="%"
+            disabled={!curveOn}
+            onChange={(v) => update({ curvePower: v / 100 })}
           />
         </div>
       )}
@@ -381,6 +529,45 @@ function EffectsPopover({ el }: { el: TextElement | ShapeElement }) {
           disabled={!shadowOn}
           onChange={(v) => set({ shadowOpacity: v / 100 })}
         />
+      </div>
+
+      <div className="popover__section" data-effects-section="filter">
+        <span className="popover__heading">Blur &amp; filter warna</span>
+        <Slider
+          label="Blur"
+          name="blurRadius"
+          value={el.blurRadius ?? 0}
+          min={0}
+          max={40}
+          unit=" px"
+          onChange={(v) => set({ blurRadius: v === 0 ? undefined : v })}
+        />
+        {(["brightness", "contrast", "saturation"] as const).map((key) => (
+          <Slider
+            key={key}
+            label={key === "brightness" ? "Kecerahan" : key === "contrast" ? "Kontras" : "Saturasi"}
+            name={key}
+            value={el[key] ?? 0}
+            min={-FILTER_LIMIT}
+            max={FILTER_LIMIT}
+            onChange={(v) => set({ [key]: v === 0 ? undefined : v })}
+          />
+        ))}
+        <label className="dash-picker">
+          <span className="slider__label">Preset</span>
+          <select
+            value={el.filterPreset ?? ""}
+            data-style-control="filterPreset"
+            onChange={(e) => set({ filterPreset: (e.target.value || undefined) as FilterPreset | undefined })}
+          >
+            <option value="">Tanpa preset</option>
+            {FILTER_PRESETS.map((p) => (
+              <option key={p} value={p}>
+                {PRESET_LABEL[p]}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
     </Popover>
   );

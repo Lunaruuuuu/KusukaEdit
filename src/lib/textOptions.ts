@@ -9,6 +9,7 @@
 import type { TextDecoration, TextElement, TextListType, TextTransform } from "@/types/editor";
 import { parseColor } from "@/lib/color";
 import { MAX_STROKE_WIDTH } from "@/lib/imageEffects";
+import { MAX_BACKGROUND_FRACTION, POLOTNO_BACKGROUND_COLOR } from "@/lib/textEffects";
 
 /** Letter spacing is a fraction of the font size; beyond these it is unreadable. */
 export const MIN_LETTER_SPACING = -0.2;
@@ -20,7 +21,20 @@ export const TEXT_LIST_TYPES: readonly TextListType[] = ["bullet", "number"];
 /** The optional text fields this module reads and writes. */
 export type TextOptionFields = Pick<
   TextElement,
-  "stroke" | "strokeWidth" | "textDecoration" | "letterSpacing" | "textTransform" | "listType" | "autoFit"
+  | "stroke"
+  | "strokeWidth"
+  | "textDecoration"
+  | "letterSpacing"
+  | "textTransform"
+  | "listType"
+  | "autoFit"
+  | "backgroundEnabled"
+  | "backgroundColor"
+  | "backgroundOpacity"
+  | "backgroundCornerRadius"
+  | "backgroundPadding"
+  | "curveEnabled"
+  | "curvePower"
 >;
 
 type Rec = Record<string, unknown>;
@@ -104,6 +118,31 @@ export function readTextOptions(raw: Rec, source: "native" | "polotno", color: (
   const extra: Rec = source === "native" ? raw : typeof raw.custom === "object" && raw.custom !== null ? (raw.custom as Rec) : {};
   if (TEXT_LIST_TYPES.includes(extra.listType as TextListType)) fields.listType = extra.listType as TextListType;
   if (extra.autoFit === true) fields.autoFit = true;
+
+  // Text background and curve: Polotno and native files use the same names, at
+  // the top level. Only read when switched on (Polotno's defaults are present
+  // in files where they are off).
+  if (raw.backgroundEnabled === true) {
+    const bg = color(raw.backgroundColor === undefined ? POLOTNO_BACKGROUND_COLOR : raw.backgroundColor);
+    if (bg !== null) {
+      fields.backgroundEnabled = true;
+      fields.backgroundColor = bg;
+      const opacity = num(raw.backgroundOpacity, 1);
+      if (opacity < 1) fields.backgroundOpacity = round4(clamp(opacity, 0, 1));
+      // Absent = Polotno's default (0.5), so only a value given in the file is kept.
+      if (raw.backgroundCornerRadius !== undefined) {
+        fields.backgroundCornerRadius = round4(clamp(num(raw.backgroundCornerRadius, 0.5), 0, MAX_BACKGROUND_FRACTION));
+      }
+      if (raw.backgroundPadding !== undefined) {
+        fields.backgroundPadding = round4(clamp(num(raw.backgroundPadding, 0.5), 0, MAX_BACKGROUND_FRACTION));
+      }
+    }
+  }
+  if (raw.curveEnabled === true) {
+    fields.curveEnabled = true;
+    // Polotno's default power is 0.5.
+    fields.curvePower = round4(clamp(num(raw.curvePower, 0.5), -1, 1));
+  }
   return fields;
 }
 

@@ -17,6 +17,7 @@ import {
   resolveOpacity,
 } from "@/lib/imageEffects";
 import { EFFECT_KEYS, FILTER_KEYS, clearPatch, type ImageStylePatch } from "@/lib/imageStyle";
+import DashPicker from "@/components/DashPicker";
 
 // ---------------------------------------------------------------------------
 // "Filter & Efek": one place for how a picture looks. Three cards side by side:
@@ -27,7 +28,7 @@ import { EFFECT_KEYS, FILTER_KEYS, clearPatch, type ImageStylePatch } from "@/li
 // step and everything is saved in the JSON of the picture.
 // ---------------------------------------------------------------------------
 
-const PRESET_LABEL: Record<FilterPreset, string> = {
+export const PRESET_LABEL: Record<FilterPreset, string> = {
   grayscale: "Hitam-putih",
   sepia: "Sepia",
   vivid: "Cerah",
@@ -340,6 +341,7 @@ function Panel({ element, set }: { element: ImageElement; set: (patch: ImageStyl
             set(v === 0 ? clearPatch(["stroke", "strokeWidth"]) : { strokeWidth: v, stroke: element.stroke ?? "#000000" })
           }
         />
+        <DashPicker value={element.dash} disabled={!fx.stroke} onChange={(dash) => set({ dash })} />
       </div>
     </section>
   );

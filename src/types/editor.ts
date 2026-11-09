@@ -30,10 +30,14 @@ export type TextListType = "bullet" | "number";
  *       toolbar: justify, underline / strike-through, letter spacing, upper /
  *       lower case, bullet / numbered lists and auto-fit. All new fields are
  *       optional, so a v3 file is a valid v4 file as it is.
+ *   v5: blur and colour filter on EVERY element type (they were picture-only),
+ *       a dash pattern for borders (`dash`), and two text effects: a background
+ *       box behind the text (background*) and curved text (curve*). All new
+ *       fields are optional again: a v4 file is a valid v5 file.
  * Files with an older `version` are migrated automatically on load (a v1/v2
  * file becomes a one-page document).
  */
-export const SCHEMA_VERSION = 4 as const;
+export const SCHEMA_VERSION = 5 as const;
 
 /** The last schema in which a document was ONE canvas (`canvas` + `elements`). */
 export const LAST_SINGLE_PAGE_SCHEMA = 2 as const;
@@ -69,6 +73,28 @@ interface BaseElement {
   shadowOffsetY?: number;
   /** 0..1, multiplied into the shadow colour. Absent = 1. */
   shadowOpacity?: number;
+
+  // ---- Blur and colour filter (v5: every element type; were picture-only) ---
+  // Polotno: blurEnabled + blurRadius, brightnessEnabled + brightness,
+  // sepiaEnabled / grayscaleEnabled, filters.contrast / .saturation.
+
+  /** Gaussian-style blur of the whole element, in design px. 0 / absent = sharp. */
+  blurRadius?: number;
+  /** -100..100, 0 = unchanged. Added to every channel (Polotno: brightness x100). */
+  brightness?: number;
+  /** -100..100, 0 = unchanged. Stretches the channels around mid-grey. */
+  contrast?: number;
+  /** -100..100, 0 = unchanged, -100 = black and white, +100 = twice as colourful. */
+  saturation?: number;
+  /** A ready-made look, applied together with the three sliders above. Absent = none. */
+  filterPreset?: FilterPreset;
+
+  /**
+   * Dash pattern of the border (stroke), in design px: [dash, gap, dash, gap ...],
+   * e.g. [10, 5]. Absent / empty = a solid line. Drawn only where the element
+   * has a border (a shape's stroke, a text outline, a picture's border).
+   */
+  dash?: number[];
 }
 
 export interface TextElement extends BaseElement {
@@ -108,6 +134,26 @@ export interface TextElement extends BaseElement {
    * size shrinks (see lib/textFit.ts).
    */
   autoFit?: boolean;
+
+  // ---- Text background (Polotno: the same five fields) ----------------------
+  /** A box of `backgroundColor` behind every line of text. Absent = off. */
+  backgroundEnabled?: boolean;
+  backgroundColor?: string;
+  /** 0..1 for the box only. Absent = 1. */
+  backgroundOpacity?: number;
+  /**
+   * Corner radius and padding of the box, as Polotno stores them: a FRACTION of
+   * half a line (fontSize x lineHeight x 0.5), so the box grows with the text.
+   * Absent = 0.5 (Polotno's default).
+   */
+  backgroundCornerRadius?: number;
+  backgroundPadding?: number;
+
+  // ---- Curved text (Polotno: curveEnabled + curvePower) ---------------------
+  /** The text is drawn on one circular arc. Absent = straight. */
+  curveEnabled?: boolean;
+  /** -1..1: how far the arc bends. > 0 arches up, < 0 bends down, 0 = straight. */
+  curvePower?: number;
 }
 
 export interface ShapeElement extends BaseElement {
@@ -159,12 +205,10 @@ export interface ImageElement extends BaseElement {
   vector?: boolean;
 
   // ---- Visual effects (all optional: absent = no effect) -------------------
-  // They are what Polotno calls blurRadius, borderSize / borderColor and
-  // clipSrc. Every length is in design pixels. Opacity and the drop shadow are
-  // shared with every element type (see BaseElement).
+  // They are what Polotno calls borderSize / borderColor and clipSrc. Every
+  // length is in design pixels. Opacity, drop shadow, blur, the colour filter
+  // and the dash are shared with every element type (see BaseElement).
 
-  /** Gaussian-style blur of the whole picture (Konva.Filters.Blur). 0 / absent = sharp. */
-  blurRadius?: number;
   /** Border colour (#rrggbb), drawn over the picture along the box or the mask outline. */
   stroke?: string;
   /** Border thickness; 0 / absent = no border. */
@@ -181,16 +225,6 @@ export interface ImageElement extends BaseElement {
    * round). Absent / 0 = square corners.
    */
   cornerRadius?: number;
-
-  // ---- Colour filter (all optional: absent = the picture as it is) ---------
-  /** -100..100, 0 = unchanged. Added to every channel (Konva's Brighten; Polotno: brightness x100). */
-  brightness?: number;
-  /** -100..100, 0 = unchanged. Stretches the channels around mid-grey. */
-  contrast?: number;
-  /** -100..100, 0 = unchanged, -100 = black and white, +100 = twice as colourful. */
-  saturation?: number;
-  /** A ready-made look, applied together with the three sliders above. Absent = none. */
-  filterPreset?: FilterPreset;
 }
 
 /** The masks a picture can be cut to. */

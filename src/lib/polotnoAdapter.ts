@@ -26,10 +26,19 @@
 //   text    stroke + strokeWidth, textDecoration, letterSpacing (fraction of
 //           fontSize), textTransform (upper/lower) -> the same fields
 //   text    custom.listType / custom.autoFit (written by this editor) -> listType / autoFit
+//   text    backgroundEnabled + backgroundColor / backgroundOpacity /
+//           backgroundCornerRadius / backgroundPadding -> the same fields
+//   text    curveEnabled + curvePower       -> the same fields
+//   text/image custom.dash (written by this editor) -> dash
 //   any     opacity                         -> opacity (absent when 1)
 //   any     shadowEnabled + shadowColor / shadowBlur / shadowOffsetX|Y /
 //           shadowOpacity                   -> shadow* (text, figure, image and svg)
+//   any     blurEnabled + blurRadius, brightnessEnabled + brightness,
+//           sepiaEnabled / grayscaleEnabled, filters.contrast / .saturation
+//                                           -> blurRadius / brightness / filterPreset /
+//                                              contrast / saturation (every type since v5)
 //   figure  subType rect | circle           -> shape.shapeType
+//   figure  dash (multiples of the stroke)  -> shape.dash (px; see lib/textEffects.ts)
 //   image   src, cropX/Y/Width/Height       -> image (src + crop as 0..1 fractions)
 //   svg     src (URL or data URI), colorsReplace -> image with vector: true
 //   image/svg  flipX, flipY, scaleX, scaleY -> image.scaleX / scaleY (= ±1)
@@ -75,15 +84,18 @@ import {
 import { newId } from "@/lib/id";
 import { isColorSpecified, normalizeColor, parseColor } from "@/lib/color";
 import {
+  filterEffectsToPolotno,
   hasUnknownFilters,
   imageEffectsToPolotno,
   opacityToPolotno,
   readNativeCommonEffects,
   readNativeImageEffects,
   readPolotnoCommonEffects,
+  readPolotnoFilterEffects,
   readPolotnoImageEffects,
   shadowToPolotno,
 } from "@/lib/polotnoEffects";
+import { dashFromPolotno, dashToPolotno, polotnoDashUnit, sanitizeDash } from "@/lib/textEffects";
 import { hasUnknownDecoration, readTextOptions } from "@/lib/textOptions";
 import { isObjectUrl } from "@/lib/objectUrls";
 
@@ -747,21 +759,17 @@ export function sanitizeKusukaDocument(
 
 // ------------------------- Polotno -> KusukaEdit --------------------------
 
+/**
+ * True for the few Polotno effects that still have no counterpart here. Since
+ * v5 opacity, shadow, blur, brightness, sepia, grayscale, contrast,
+ * saturation, dash, the text background and curved text are carried over on
+ * every element type, so what is left is rare: a decoration other than
+ * underline / line-through ("overline"), a case other than upper / lower
+ * ("capitalize"), and a picture mask made from another picture (maskSrc).
+ * Unknown entries of `filters` are counted on their own (see unknownFilters).
+ */
 function hasUnsupportedEffects(child: Record<string, unknown>): boolean {
   const isPicture = child.type === "image" || child.type === "svg";
-  // Opacity and the drop shadow are supported on every element type
-  // (BaseElement.opacity / shadow*); blur only on pictures.
-  if (child.blurEnabled === true && !isPicture) return true;
-  if (
-    child.brightnessEnabled === true ||
-    child.sepiaEnabled === true ||
-    child.grayscaleEnabled === true
-  ) {
-    // A picture's brightness / sepia / grayscale are supported (see
-    // lib/polotnoEffects.ts); on text and shapes they are not.
-    if (!isPicture) return true;
-  }
-  if (child.backgroundEnabled === true || child.curveEnabled === true) return true;
   if (child.type === "text") {
     // Supported: stroke + strokeWidth, letterSpacing, underline / line-through,
     // upper / lower case (see lib/textOptions.ts). Not: other decorations
@@ -775,15 +783,16 @@ function hasUnsupportedEffects(child: Record<string, unknown>): boolean {
     }
   }
   if (isPicture) {
-    // Supported: flipX / flipY (scaleX / scaleY), borderSize (stroke), a circle
-    // or triangle clipSrc (maskShape), cornerRadius, and the contrast /
-    // saturation entries of `filters`. An unrecognised clipSrc is counted on
-    // its own (see `unknownMasks`).
+    // An unrecognised clipSrc is counted on its own (see `unknownMasks`).
     if (typeof child.maskSrc === "string" && child.maskSrc !== "") return true;
-    if (hasUnknownFilters(child.filters)) return true;
   }
-  if (Array.isArray(child.dash) && child.dash.length > 0) return true;
   return false;
+}
+
+/** The dash this editor wrote into `custom` for a text or a picture (Polotno has none there). */
+function customDash(child: Record<string, unknown>): { dash?: number[] } {
+  const dash = isRecord(child.custom) ? sanitizeDash(child.custom.dash) : null;
+  return dash ? { dash } : {};
 }
 
 export interface ConvertOptions {
@@ -890,6 +899,15 @@ function convertPolotnoPage(
     return parsed;
   };
 
+  // Blur and colour filter of a text or a figure (pictures read theirs with the
+  // rest of their effects). Unknown `filters` entries are counted.
+  const filterFields = (child: Record<string, unknown>) => {
+    const read = readPolotnoFilterEffects(child);
+    if (read.unknownFilter) t.unknownFilters++;
+    if (read.presetConflict) t.presetConflicts++;
+    return read.fields;
+  };
+
   const children = Array.isArray(page?.children) ? page.children : [];
   children.forEach((child) => {
     if (!isRecord(child)) return;
@@ -941,6 +959,8 @@ function convertPolotnoPage(
         ...(pad > 0 ? { widthTolerance: pad } : {}),
         ...readTextOptions(child, "polotno", optionalColor),
         ...readPolotnoCommonEffects(child, color),
+        ...filterFields(child),
+        ...customDash(child),
       };
       if (hasUnsupportedEffects(child)) t.effectCount++;
       if (hasIgnoredTransform(child)) t.ignoredTransforms++;
@@ -955,16 +975,22 @@ function convertPolotnoPage(
         return;
       }
       const shapeType = subType === "rect" ? "rect" : "circle";
+      const fields = base();
+      const strokeWidth = Math.max(0, num(child.strokeWidth, 0));
+      // Polotno's figure dash is in multiples of the stroke it draws (see lib/textEffects.ts).
+      const dash = dashFromPolotno(child.dash, polotnoDashUnit(strokeWidth, fields.width, fields.height));
       const el: ShapeElement = {
-        ...base(),
+        ...fields,
         type: "shape",
         shapeType,
         // Polotno's defaults for a figure: rgb(0, 161, 255) fill, rgba(98, 197, 255, 1) stroke.
         fill: color(child.fill, "#00a1ff"),
         stroke: color(child.stroke, "#62c5ff"),
-        strokeWidth: Math.max(0, num(child.strokeWidth, 0)),
+        strokeWidth,
         cornerRadius: shapeType === "rect" ? Math.max(0, num(child.cornerRadius, 0)) : 0,
         ...readPolotnoCommonEffects(child, color),
+        ...filterFields(child),
+        ...(dash ? { dash } : {}),
       };
       if (hasUnsupportedEffects(child)) t.effectCount++;
       if (hasIgnoredTransform(child)) t.ignoredTransforms++;
@@ -1011,6 +1037,7 @@ function convertPolotnoPage(
         scaleY: mirrored.scaleY,
         ...(vector ? { vector: true } : {}),
         ...effects.fields,
+        ...customDash(child),
       };
       if (hasUnsupportedEffects(child)) t.effectCount++;
       elements.push(el);
@@ -1102,17 +1129,17 @@ export function convertPolotnoToKusuka(
   }
   if (t.unknownFilters > 0) {
     warnings.push(
-      `${pluralize(t.unknownFilters, "gambar")} memakai filter (objek filters) selain kontras dan saturasi; filter itu diabaikan.`
+      `${pluralize(t.unknownFilters, "elemen")} memakai filter (objek filters) selain kontras dan saturasi; filter itu diabaikan.`
     );
   }
   if (t.presetConflicts > 0) {
     warnings.push(
-      `${pluralize(t.presetConflicts, "gambar")} mengaktifkan grayscale dan sepia sekaligus; hanya grayscale yang dipakai.`
+      `${pluralize(t.presetConflicts, "elemen")} mengaktifkan grayscale dan sepia sekaligus; hanya grayscale yang dipakai.`
     );
   }
   if (t.effectCount > 0) {
     warnings.push(
-      `${pluralize(t.effectCount, "elemen")} memakai efek yang belum didukung (blur atau filter warna pada teks dan bentuk, latar teks, teks melengkung, garis putus-putus, dll.); tampilan bisa sedikit berbeda.`
+      `${pluralize(t.effectCount, "elemen")} memakai efek yang belum didukung (garis atas/overline, huruf kapital di awal kata/capitalize, atau mask dari gambar/maskSrc); tampilan bisa sedikit berbeda.`
     );
   }
 
@@ -1140,14 +1167,46 @@ function polotnoCommon(el: CanvasElement): PolotnoElement {
   };
 }
 
-/** `custom` of an exported text: our source marker, list type and auto-fit (only what applies). */
-function textCustom(el: TextElement, padded: boolean): { custom?: Record<string, unknown> } {
-  const custom: Record<string, unknown> = {
+/** `custom` of an exported text: our source marker, list type, auto-fit and dash (only what applies). */
+function textCustom(el: TextElement, padded: boolean): Record<string, unknown> {
+  const dash = sanitizeDash(el.dash);
+  return {
     ...(padded ? {} : { source: OWN_EXPORT_SOURCE }),
     ...(el.listType ? { listType: el.listType } : {}),
     ...(el.autoFit ? { autoFit: true } : {}),
+    ...(dash ? { dash } : {}),
   };
-  return Object.keys(custom).length > 0 ? { custom } : {};
+}
+
+/**
+ * Merges the `custom` objects several writers produced (text options, a filter
+ * preset Polotno has no flag for, a dash) into one; none = no `custom` at all.
+ */
+function withCustom(out: Record<string, unknown>, ...parts: Array<Record<string, unknown> | undefined>): PolotnoElement {
+  const custom: Record<string, unknown> = {};
+  for (const part of parts) if (part) Object.assign(custom, part);
+  const { custom: _drop, ...rest } = out;
+  return (Object.keys(custom).length > 0 ? { ...rest, custom } : rest) as PolotnoElement;
+}
+
+const customOf = (rec: Record<string, unknown>): Record<string, unknown> | undefined =>
+  isRecord(rec.custom) ? rec.custom : undefined;
+
+/** The text background and curve, written only when on (Polotno's defaults: off). */
+function textEffectsToPolotno(el: TextElement): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (el.backgroundEnabled) {
+    out.backgroundEnabled = true;
+    out.backgroundColor = el.backgroundColor ?? "#7ED321";
+    out.backgroundOpacity = el.backgroundOpacity ?? 1;
+    out.backgroundCornerRadius = el.backgroundCornerRadius ?? 0.5;
+    out.backgroundPadding = el.backgroundPadding ?? 0.5;
+  }
+  if (el.curveEnabled) {
+    out.curveEnabled = true;
+    out.curvePower = el.curvePower ?? 0.5;
+  }
+  return out;
 }
 
 function toPolotnoElement(el: CanvasElement): PolotnoElement {
@@ -1155,7 +1214,9 @@ function toPolotnoElement(el: CanvasElement): PolotnoElement {
     // Undo the import tolerance: Polotno gets back the box it came with.
     const pad = el.widthTolerance !== undefined && el.widthTolerance > 0 ? el.widthTolerance : 0;
     const shift = rotateVector(-alignFactor(el.align) * pad, 0, el.rotation);
-    return {
+    // No source marker from here: textCustom decides it (it depends on the width tolerance).
+    const filters = filterEffectsToPolotno(el);
+    const out: Record<string, unknown> = {
       ...polotnoCommon(el),
       ...(pad > 0
         ? {
@@ -1164,10 +1225,6 @@ function toPolotnoElement(el: CanvasElement): PolotnoElement {
             width: Math.max(1, round6(el.width - pad)),
           }
         : {}),
-      // Only a width measured here (no tolerance) is marked as such, so it is
-      // not padded a second time when this file is imported again. List and
-      // auto-fit have no Polotno field: they ride along in `custom` too.
-      ...textCustom(el, pad > 0),
       text: el.text,
       placeholder: "",
       fontSize: el.fontSize,
@@ -1185,24 +1242,37 @@ function toPolotnoElement(el: CanvasElement): PolotnoElement {
         ? { stroke: el.stroke, strokeWidth: el.strokeWidth }
         : { strokeWidth: 0 }),
       ...shadowToPolotno(el),
+      ...filters,
+      ...textEffectsToPolotno(el),
     };
+    // Only a width measured here (no tolerance) is marked as such, so it is
+    // not padded a second time when this file is imported again. List,
+    // auto-fit and dash have no Polotno field: they ride along in `custom`.
+    return withCustom(out, customOf(filters), textCustom(el, pad > 0));
   }
   if (el.type === "shape") {
-    return {
-      ...polotnoCommon(el),
-      type: "figure",
-      subType: el.shapeType,
-      fill: el.fill,
-      stroke: el.stroke,
-      strokeWidth: el.strokeWidth,
-      cornerRadius: el.cornerRadius,
-      dash: [],
-      ...shadowToPolotno(el),
-    };
+    const filters = filterEffectsToPolotno(el, OWN_EXPORT_SOURCE);
+    return withCustom(
+      {
+        ...polotnoCommon(el),
+        type: "figure",
+        subType: el.shapeType,
+        fill: el.fill,
+        stroke: el.stroke,
+        strokeWidth: el.strokeWidth,
+        cornerRadius: el.cornerRadius,
+        dash: dashToPolotno(el.dash, polotnoDashUnit(el.strokeWidth, el.width, el.height)),
+        ...shadowToPolotno(el),
+        ...filters,
+      },
+      customOf(filters)
+    );
   }
   // The box (x, y, width, height) is written as it is: Polotno's flipX/flipY
   // mirror the picture inside it, which is also what scaleX/scaleY = -1 mean here.
-  return {
+  const effects = imageEffectsToPolotno(el, OWN_EXPORT_SOURCE);
+  const dash = sanitizeDash(el.dash);
+  const picture: Record<string, unknown> = {
     ...polotnoCommon(el),
     type: el.vector ? "svg" : "image",
     src: el.src,
@@ -1216,8 +1286,10 @@ function toPolotnoElement(el: CanvasElement): PolotnoElement {
     flipY: el.scaleY === -1,
     // blur / border / shadow / mask / corner radius / colour filter: only the
     // ones that are on are written (a corner radius replaces the 0 above).
-    ...imageEffectsToPolotno(el, OWN_EXPORT_SOURCE),
+    ...effects,
   };
+  // Polotno's pictures have no dash: it rides along in `custom` (with the source marker).
+  return withCustom(picture, customOf(effects), dash ? { source: OWN_EXPORT_SOURCE, dash } : undefined);
 }
 
 function toPolotnoPage(page: Page, doc: { width: number; height: number }): PolotnoPage {

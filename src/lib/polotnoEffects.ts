@@ -17,8 +17,9 @@
 //   custom.filterPreset (our own, written for     filterPreset: vivid | fade | warm | cool | dramatic
 //     the presets Polotno has no flag for)
 //
-// Opacity and the drop shadow are not picture-only: readPolotnoCommonEffects /
-// commonEffectsToPolotno do the same for text and figures.
+// Opacity, the drop shadow, blur and the colour filter are not picture-only
+// (Polotno has them on every element): readPolotnoCommonEffects /
+// readPolotnoFilterEffects / filterEffectsToPolotno serve text and figures too.
 //
 // An effect is only read when Polotno says it is ON (`blurEnabled`,
 // `shadowEnabled`): its defaults (blurRadius 10, shadowBlur 5 ...) are present
@@ -27,6 +28,7 @@
 
 import type { FilterPreset, MaskShape } from "@/types/editor";
 import { colorAlpha, parseColor } from "@/lib/color";
+import { sanitizeDash } from "@/lib/textEffects";
 import {
   FILTER_LIMIT,
   FILTER_PRESETS,
@@ -45,6 +47,11 @@ import {
 
 /** Opacity + drop shadow: the effects every element type has. */
 export type CommonEffectFields = Partial<ShadowFields & { opacity: number }>;
+
+/** Blur + colour filter: since v5 also on every element type. */
+export type FilterEffectFields = Partial<
+  Pick<ImageEffectFields, "blurRadius" | "brightness" | "contrast" | "saturation" | "filterPreset">
+>;
 
 type Rec = Record<string, unknown>;
 
@@ -269,11 +276,8 @@ export type ColorReader = (value: unknown, fallback: string) => string;
  */
 export function readPolotnoImageEffects(child: Rec, color: ColorReader): ReadEffects {
   const fields: Partial<ImageEffectFields> = {};
-
-  if (child.blurEnabled === true) {
-    const radius = clamp(num(child.blurRadius, POLOTNO_BLUR_RADIUS), 0, MAX_BLUR_RADIUS);
-    if (radius > 0) fields.blurRadius = radius;
-  }
+  const filter = readPolotnoFilterEffects(child);
+  Object.assign(fields, filter.fields);
 
   const borderSize = num(child.borderSize, 0);
   if (borderSize > 0) {
@@ -296,8 +300,24 @@ export function readPolotnoImageEffects(child: Rec, color: ColorReader): ReadEff
   const radius = num(child.cornerRadius, 0);
   if (radius > 0) fields.cornerRadius = clamp(radius, 0, MAX_CORNER_RADIUS);
 
-  // Colour filter. Like blur and shadow, brightness only counts when Polotno
-  // says it is ON (`brightnessEnabled`).
+  return { fields, unknownMask, unknownFilter: filter.unknownFilter, presetConflict: filter.presetConflict };
+}
+
+/**
+ * Blur and colour filter of ANY Polotno element (Polotno has them on text,
+ * figures and pictures alike). Like the shadow, blur and brightness only count
+ * when Polotno says they are ON (`blurEnabled`, `brightnessEnabled`).
+ */
+export function readPolotnoFilterEffects(child: Rec): {
+  fields: FilterEffectFields;
+  unknownFilter: boolean;
+  presetConflict: boolean;
+} {
+  const fields: FilterEffectFields = {};
+  if (child.blurEnabled === true) {
+    const blur = clamp(num(child.blurRadius, POLOTNO_BLUR_RADIUS), 0, MAX_BLUR_RADIUS);
+    if (blur > 0) fields.blurRadius = blur;
+  }
   if (child.brightnessEnabled === true) {
     const brightness = Math.round(clamp(num(child.brightness, 0), -1, 1) * FILTER_LIMIT);
     if (brightness !== 0) fields.brightness = brightness;
@@ -317,8 +337,7 @@ export function readPolotnoImageEffects(child: Rec, color: ColorReader): ReadEff
     // One of the presets Polotno has no flag for: this editor wrote it itself.
     fields.filterPreset = child.custom.filterPreset;
   }
-
-  return { fields, unknownMask, unknownFilter: hasUnknownFilters(child.filters), presetConflict };
+  return { fields, unknownFilter: hasUnknownFilters(child.filters), presetConflict };
 }
 
 /**
@@ -385,10 +404,6 @@ function isFilterPreset(value: unknown): value is FilterPreset {
 export function readNativeImageEffects(item: Rec): Partial<ImageEffectFields> {
   const fields: Partial<ImageEffectFields> = {};
 
-  if (finite(item.blurRadius) && item.blurRadius > 0) {
-    fields.blurRadius = clamp(item.blurRadius, 0, MAX_BLUR_RADIUS);
-  }
-
   const stroke = parseColor(item.stroke);
   if (finite(item.strokeWidth) && item.strokeWidth > 0 && stroke !== null && stroke !== "transparent") {
     fields.stroke = stroke;
@@ -404,6 +419,15 @@ export function readNativeImageEffects(item: Rec): Partial<ImageEffectFields> {
   if (finite(item.cornerRadius) && item.cornerRadius > 0) {
     fields.cornerRadius = clamp(item.cornerRadius, 0, MAX_CORNER_RADIUS);
   }
+  return fields;
+}
+
+/** Blur and colour filter of an element of a native file (any type since v5). */
+export function readNativeFilterEffects(item: Rec): FilterEffectFields {
+  const fields: FilterEffectFields = {};
+  if (finite(item.blurRadius) && item.blurRadius > 0) {
+    fields.blurRadius = clamp(item.blurRadius, 0, MAX_BLUR_RADIUS);
+  }
   for (const key of ["brightness", "contrast", "saturation"] as const) {
     const value = item[key];
     if (finite(value) && value !== 0) fields[key] = Math.round(clamp(value, -FILTER_LIMIT, FILTER_LIMIT));
@@ -413,8 +437,10 @@ export function readNativeImageEffects(item: Rec): Partial<ImageEffectFields> {
 }
 
 /** Opacity and drop shadow of an element of a native file, validated like the picture effects. */
-export function readNativeCommonEffects(item: Rec): CommonEffectFields {
-  const fields: CommonEffectFields = {};
+export function readNativeCommonEffects(item: Rec): CommonEffectFields & FilterEffectFields & { dash?: number[] } {
+  const fields: CommonEffectFields & FilterEffectFields & { dash?: number[] } = { ...readNativeFilterEffects(item) };
+  const dash = sanitizeDash(item.dash);
+  if (dash) fields.dash = dash;
   // 1 is "no effect": not stored, so the file stays as it was.
   if (finite(item.opacity) && item.opacity < 1) fields.opacity = clamp(item.opacity, 0, 1);
 
@@ -438,11 +464,7 @@ export function readNativeCommonEffects(item: Rec): CommonEffectFields {
  */
 export function imageEffectsToPolotno(el: Partial<ImageEffectFields>, customSource?: string): Rec {
   const fx = resolveImageEffects(el);
-  const out: Rec = {};
-  if (fx.blur > 0) {
-    out.blurEnabled = true;
-    out.blurRadius = fx.blur;
-  }
+  const out: Rec = filterEffectsToPolotno(el, customSource);
   if (fx.stroke) {
     out.borderSize = fx.stroke.width;
     out.borderColor = fx.stroke.color;
@@ -453,7 +475,20 @@ export function imageEffectsToPolotno(el: Partial<ImageEffectFields>, customSour
   // can hold both, and a file that is read and written again must not lose it).
   const radius = finite(el.cornerRadius) ? clamp(el.cornerRadius, 0, MAX_CORNER_RADIUS) : 0;
   if (radius > 0) out.cornerRadius = radius;
+  return out;
+}
 
+/**
+ * Blur and colour filter of ANY element, as Polotno writes them. Only what is
+ * on is written. The presets Polotno has no flag for ride in `custom`.
+ */
+export function filterEffectsToPolotno(el: FilterEffectFields, customSource?: string): Rec {
+  const fx = resolveImageEffects(el);
+  const out: Rec = {};
+  if (fx.blur > 0) {
+    out.blurEnabled = true;
+    out.blurRadius = fx.blur;
+  }
   if (fx.filter) {
     const f = fx.filter;
     if (f.brightness !== 0) {

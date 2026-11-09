@@ -1869,3 +1869,51 @@ input:focus-visible {
     font-size: 12px;
   }
 }
+
+/* ======================================================================
+   v10: effects popover (text background, curve, dash, filters) and the
+   3-line alignment icon
+   ====================================================================== */
+/* Every alignment shows THREE lines; only how they line up differs. (With
+   align-items center / flex-end a line without its own width shrank to 0, so
+   "center" and "right" used to show a single line.) */
+.align-icon i {
+  width: 100%;
+  flex: none;
+}
+.align-icon i:nth-child(2) {
+  width: 62%;
+}
+.align-icon i:nth-child(3) {
+  width: 82%;
+}
+.align-icon--justify i:nth-child(2),
+.align-icon--justify i:nth-child(3) {
+  width: 100%;
+}
+.popover__panel[data-popover="effects"] {
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
+  min-width: 290px;
+}
+.popover__heading {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.dash-picker {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.dash-picker select {
+  min-width: 0;
+  padding: 5px 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
