@@ -4,7 +4,9 @@ Prototipe / MVP komponen design editor kanvas untuk Next.js, terinspirasi dari
 arsitektur [Polotno](https://polotno.com/). Dibangun dengan **React-Konva**
 untuk rendering kanvas, dan **Zustand** untuk state management.
 
-Status: **MVP kerja praktek, versi 10** (paket `0.10.0`, rilis "KusukaEdit Ver 0.8") — versi
+Status: **MVP kerja praktek, versi 10** (paket `0.10.1`, rilis "KusukaEdit Ver 0.8"; 0.10.1 hanya
+menaikkan Next.js ke `^14.2.35` dan menambahkan `package-lock.json`, lihat
+[Pembaruan keamanan dependensi](#pembaruan-keamanan-dependensi-0101)) — versi
 ini menerjemahkan **efek visual Polotno tanpa peringatan**: blur dan filter warna kini berlaku
 untuk teks dan bentuk, ditambah **garis putus-putus** (`dash`), **latar teks** (kotak per baris
 dengan sudut membulat dan padding yang mengikuti ukuran huruf), dan **teks melengkung**. Semuanya
@@ -59,6 +61,7 @@ auto-fit teks; skema JSON native v4.
 - [Template](#template-galeri-preset)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Docker](#containerization-docker)
+- [Pembaruan keamanan dependensi (0.10.1)](#pembaruan-keamanan-dependensi-0101)
 - [Catatan pengujian](#catatan-pengujian)
 - [Roadmap](#roadmap-berikutnya)
 
@@ -2244,11 +2247,9 @@ Buka `http://localhost:3000`.
 
 ### Cara kerja `Dockerfile` (3 stage)
 
-1. **`deps`** — `npm ci` menginstal dependency sesuai `package-lock.json`. Repositori
-   ini belum menyertakan lockfile (registry npm tidak terjangkau saat pengembangan),
-   jadi `Dockerfile` otomatis memakai `npm install`. Jalankan `npm install` sekali di
-   mesin yang punya akses internet dan commit `package-lock.json` agar build
-   Docker bisa direproduksi.
+1. **`deps`** — `npm ci` menginstal dependency persis sesuai `package-lock.json`
+   (di-commit sejak 0.10.1). Bila lockfile tidak ada, `Dockerfile` memakai
+   `npm install`.
 2. **`builder`** — `npm run build`. `next.config.js` memakai `output: "standalone"`
    sehingga Next.js hanya menyertakan dependency produksi yang dipakai dan
    menghasilkan `server.js` mandiri.
@@ -2269,6 +2270,33 @@ tidak perlu menyalin folder `src/templates` ke image.
 > yang menjalankan `docker build` punya akses ke registry npm atau mirror internal.
 
 ---
+
+## Pembaruan keamanan dependensi (0.10.1)
+
+- `next` di `package.json`: `14.2.5` → **`^14.2.35`**, rilis terbaru seri 14 (dist-tag
+  `next-14`) per 14 November 2026.
+- **`package-lock.json`** dibuat di kontainer, tanpa Node di mesin sendiri:
+
+  ```bash
+  docker run --rm -v "${PWD}:/app" -w /app node:20-alpine npm install
+  ```
+
+  Lalu `npm audit fix` (tanpa `--force`) menaikkan `source-map-js` (dependensi `postcss`
+  milik Next) ke 1.2.2 untuk menutup advisori HIGH GHSA-68fv-2mgg-jv7q. `package.json` tidak
+  berubah oleh langkah ini.
+- **Divalidasi:** `docker build .` berhasil, termasuk `npm ci` dari lockfile dan
+  `next build` ("Compiled successfully", 4 halaman statis). Image hasilnya dijalankan dan
+  menjawab HTTP 200. `npx tsc --noEmit` bersih dan 266 tes lulus di Node 20.
+- **Yang masih dilaporkan `npm audit --omit=dev`:**
+  - `next` (critical): advisori terbaru di basis data npm berlaku untuk seluruh rentang
+    `9.3.4-canary.0 – 16.3.0-preview.10`, jadi **tidak ada versi seri 14 yang bersih**.
+    `npm audit fix --force` akan memasang Next 16 (perubahan besar, belum dicoba).
+  - `postcss` 8.4.31 (high), yang dipatok oleh Next 14 itu sendiri.
+  - `uuid` 9 (moderate): perbaikannya di uuid 11.1.1+, yang merupakan perubahan besar. Celahnya
+    hanya pada v3/v5/v6 dengan argumen `buf`; editor ini hanya memakai `v4()`.
+
+  Apakah Railway/Render masih memblokir build karena laporan ini belum diketahui. Lihat
+  "Belum diuji".
 
 ## Catatan pengujian
 
@@ -2495,6 +2523,10 @@ dibaca dari halaman aktif.
 
 ### Belum diuji
 
+- **0.10.1:** build otomatis di **Railway/Render belum dilihat** dari sini. Yang diuji hanya
+  `docker build` lokal dengan `Dockerfile` yang sama. `npm audit` masih melaporkan `next` 14
+  (lihat "Pembaruan keamanan dependensi"). Bila platform memblokir berdasarkan audit, bukan
+  hanya berdasarkan CVE tertentu, jalan keluarnya adalah migrasi ke Next 15/16.
 - **Fitur v10 yang belum diperiksa:**
   1. Berkas hasil ekspor **belum dibuka di Polotno sungguhan**. Nama properti dan satuan latar
      teks serta dash bentuk dicocokkan dengan kode kanvas Polotno, dan pulang-pergi di editor ini
