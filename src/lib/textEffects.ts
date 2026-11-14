@@ -109,6 +109,18 @@ export function resolveTextBackground(
   };
 }
 
+/**
+ * The border of the background box (Polotno: borderColor / borderSize), or
+ * null. Drawn along the background boxes, or, with the background off, around
+ * the whole text box.
+ */
+export function resolveTextBorder(el: Pick<TextElement, "borderColor" | "borderSize">): { color: string; width: number } | null {
+  if (!finite(el.borderSize) || el.borderSize <= 0) return null;
+  const color = typeof el.borderColor === "string" && el.borderColor !== "" ? el.borderColor : "#000000";
+  if (color.trim().toLowerCase() === "transparent") return null;
+  return { color, width: clamp(el.borderSize, 0, 100) };
+}
+
 export interface Box {
   x: number;
   y: number;

@@ -169,7 +169,7 @@ test("Polotno -> Kusuka: canvas, order, circle origin, colors, fonts", () => {
   assert.deepEqual(doc.pages[1].elements, []);
   const d = { canvas: doc.pages[0].canvas, elements: doc.pages[0].elements, version: doc.version };
   assert.deepEqual(d.canvas, { width: 800, height: 500, backgroundColor: "#ffffff" });
-  assert.equal(d.version, 5);
+  assert.equal(d.version, 6);
   // hidden "g" and star "d" are dropped (the svg "e" is imported since v5);
   // zIndex follows the kept order
   assert.deepEqual(d.elements.map((e) => e.id), ["a", "b", "c", "e", "f", "h"]);
@@ -288,12 +288,12 @@ test("native v1 file without new fields: legacy defaults keep the old look", () 
   assert.equal(r.document.pages[0].canvas.backgroundColor, "#ffffff");
 });
 
-test("native v3 document passes through unchanged (idempotent), silently upgraded to v5", () => {
+test("native v3 document passes through unchanged (idempotent), silently upgraded to v6", () => {
   const r = parseDocument(JSON.parse(JSON.stringify(nativeDoc)));
   assert.ok(r.ok);
   if (!r.ok) return;
   // v4 and v5 only added optional fields: the same pages, just the new version number
-  assert.deepEqual(r.document, { ...nativeDoc, version: 5 });
+  assert.deepEqual(r.document, { ...nativeDoc, version: 6 });
   assert.deepEqual(r.warnings, []);
   const r2 = parseDocument(JSON.stringify(r.document));
   assert.ok(r2.ok && JSON.stringify(r2.document) === JSON.stringify(r.document));
@@ -304,7 +304,7 @@ test("native v2 document (one canvas + elements) becomes a one-page v3 document,
   assert.ok(r.ok);
   if (!r.ok) return;
   assert.equal(r.format, "kusuka");
-  assert.equal(r.document.version, 5);
+  assert.equal(r.document.version, 6);
   assert.equal(r.document.pages.length, 1);
   assert.deepEqual(r.document.pages[0].canvas, nativeDoc.pages[0].canvas);
   assert.deepEqual(r.document.pages[0].elements, nativeDoc.pages[0].elements);
@@ -316,8 +316,8 @@ test("parseDocument: errors and recovery", () => {
   assert.ok(!bad.ok && /bukan JSON/.test(bad.error));
   const unknown = parseDocument({ hello: "world" });
   assert.ok(!unknown.ok && /tidak dikenali/.test(unknown.error));
-  const future = parseDocument({ version: 6, pages: [] });
-  assert.ok(!future.ok && /v6/.test(future.error));
+  const future = parseDocument({ version: 7, pages: [] });
+  assert.ok(!future.ok && /v7/.test(future.error));
   const dirty = parseDocument({
     version: 2,
     canvas: { width: -5, height: "abc" },

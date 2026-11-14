@@ -1,18 +1,19 @@
 {
   "name": "canvas-design-editor",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "tsx --tsconfig tests/tsconfig.json tests/core.test.ts && tsx --tsconfig tests/tsconfig.json tests/templates.test.ts && tsx --tsconfig tests/tsconfig.json tests/media-workspace.test.ts && tsx --tsconfig tests/tsconfig.json tests/vector-text-view.test.ts && tsx --tsconfig tests/tsconfig.json tests/image-tools.test.ts && tsx --tsconfig tests/tsconfig.json tests/pages.test.ts && tsx --tsconfig tests/tsconfig.json tests/filters-export.test.ts && tsx --tsconfig tests/tsconfig.json tests/v4-effects-selection.test.ts && tsx --tsconfig tests/tsconfig.json tests/ui-flow.test.ts && tsx --tsconfig tests/tsconfig.json tests/v5-effects-text.test.ts"
+    "templates:build": "tsx --tsconfig tests/tsconfig.json scripts/build-template-thumbnails.ts",
+    "test": "tsx --tsconfig tests/tsconfig.json tests/core.test.ts && tsx --tsconfig tests/tsconfig.json tests/templates.test.ts && tsx --tsconfig tests/tsconfig.json tests/media-workspace.test.ts && tsx --tsconfig tests/tsconfig.json tests/vector-text-view.test.ts && tsx --tsconfig tests/tsconfig.json tests/image-tools.test.ts && tsx --tsconfig tests/tsconfig.json tests/pages.test.ts && tsx --tsconfig tests/tsconfig.json tests/filters-export.test.ts && tsx --tsconfig tests/tsconfig.json tests/v4-effects-selection.test.ts && tsx --tsconfig tests/tsconfig.json tests/ui-flow.test.ts && tsx --tsconfig tests/tsconfig.json tests/v5-effects-text.test.ts && tsx --tsconfig tests/tsconfig.json tests/v6-library-lossless.test.ts"
   },
   "dependencies": {
     "konva": "^9.3.6",
     "react-konva": "^18.2.10",
-    "next": "14.2.5",
+    "next": "^14.2.35",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "uuid": "^9.0.1",

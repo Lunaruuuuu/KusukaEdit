@@ -64,6 +64,14 @@
 //
 // Anything that cannot be mapped is never dropped silently: it is counted and
 // reported in `warnings`.
+//
+// Lossless round trip (v6): every Polotno property this editor does not use
+// (an element's name and locks, verticalAlign, blendMode, animations, its own
+// `custom` keys; a page's bleed / duration; the document's schemaVersion,
+// fonts, audios, unit, dpi ...) is kept, untouched, in the `polotno` field of
+// the element / page / document, and written back on export. What the editor
+// does use is always written from the editor's own state, so an edit wins over
+// the stored copy. See elementExtras() / withExtras().
 // ---------------------------------------------------------------------------
 
 import {
@@ -611,7 +619,8 @@ function sanitizeNativePage(
   version: number,
   usedIds: Set<string>,
   usedPageIds: Set<string>,
-  t: NativeTally
+  t: NativeTally,
+  rawPolotno?: unknown
 ): Page {
   const canvasRaw = isRecord(rawCanvas) ? rawCanvas : {};
   const canvas: CanvasMeta = {
@@ -651,7 +660,7 @@ function sanitizeNativePage(
         ...readTextOptions(item, "native"),
         ...readNativeCommonEffects(item),
       };
-      elements.push(el);
+      elements.push(keepNative(item, el));
       return;
     }
 
@@ -672,7 +681,7 @@ function sanitizeNativePage(
         cornerRadius: item.shapeType === "rect" ? Math.max(0, num(item.cornerRadius, 4)) : 0,
         ...readNativeCommonEffects(item),
       };
-      elements.push(el);
+      elements.push(keepNative(item, el));
       return;
     }
 
@@ -692,14 +701,21 @@ function sanitizeNativePage(
         // Optional effects: only the valid ones are kept.
         ...readNativeImageEffects(item),
       };
-      elements.push(el);
+      elements.push(keepNative(item, el));
       return;
     }
 
     t.skipped++;
   });
 
-  return { id, canvas, elements };
+  const kept = readKeptProperties(rawPolotno);
+  return { id, canvas, elements, ...(kept ? { polotno: kept } : {}) };
+}
+
+/** A native element keeps its `polotno` record (validated as plain JSON). */
+function keepNative<T extends CanvasElement>(item: Record<string, unknown>, el: T): T {
+  const kept = readKeptProperties(item.polotno);
+  return kept ? { ...el, polotno: kept } : el;
 }
 
 export function sanitizeKusukaDocument(
@@ -728,7 +744,7 @@ export function sanitizeKusukaDocument(
         t.skippedPages++;
         continue;
       }
-      pages.push(sanitizeNativePage(item.canvas, item.elements, item.id, version, usedIds, usedPageIds, t));
+      pages.push(sanitizeNativePage(item.canvas, item.elements, item.id, version, usedIds, usedPageIds, t, item.polotno));
     }
     if (pages.length === 0) {
       pages.push(sanitizeNativePage(undefined, undefined, undefined, version, usedIds, usedPageIds, t));
@@ -754,7 +770,8 @@ export function sanitizeKusukaDocument(
     );
   }
 
-  return { document: { version: SCHEMA_VERSION, pages }, warnings };
+  const kept = readKeptProperties(raw.polotno);
+  return { document: { version: SCHEMA_VERSION, pages, ...(kept ? { polotno: kept } : {}) }, warnings };
 }
 
 // ------------------------- Polotno -> KusukaEdit --------------------------
@@ -917,6 +934,11 @@ function convertPolotnoPage(
 
     // Polotno draws children in array order (first = bottom).
     const zIndex = elements.length + 1;
+    // Every element pushed below keeps the Polotno properties the editor does not use.
+    const keep = <T extends CanvasElement>(el: T): T => {
+      const extra = elementExtras(child, el);
+      return extra ? { ...el, polotno: extra } : el;
+    };
     const base = (): BaseFields => ({ ...readBase(child, zIndex - 1, usedIds), zIndex });
 
     if (child.type === "text") {
@@ -964,7 +986,7 @@ function convertPolotnoPage(
       };
       if (hasUnsupportedEffects(child)) t.effectCount++;
       if (hasIgnoredTransform(child)) t.ignoredTransforms++;
-      elements.push(el);
+      elements.push(keep(el));
       return;
     }
 
@@ -994,7 +1016,7 @@ function convertPolotnoPage(
       };
       if (hasUnsupportedEffects(child)) t.effectCount++;
       if (hasIgnoredTransform(child)) t.ignoredTransforms++;
-      elements.push(el);
+      elements.push(keep(el));
       return;
     }
 
@@ -1040,7 +1062,7 @@ function convertPolotnoPage(
         ...customDash(child),
       };
       if (hasUnsupportedEffects(child)) t.effectCount++;
-      elements.push(el);
+      elements.push(keep(el));
       return;
     }
 
@@ -1058,7 +1080,11 @@ function convertPolotnoPage(
   });
 
 
-  return { id, canvas, elements };
+  // Page properties the editor does not use (bleed, duration, custom ...) are kept.
+  const extra = isRecord(page)
+    ? collectExtras(page as Record<string, unknown>, writePolotnoPageShell({ id, canvas }, true, true, []), DEFAULT_ONLY_PAGE_KEYS, ["id", "children"])
+    : undefined;
+  return { id, canvas, elements, ...(extra ? { polotno: extra } : {}) };
 }
 
 export function convertPolotnoToKusuka(
@@ -1143,7 +1169,9 @@ export function convertPolotnoToKusuka(
     );
   }
 
-  return { document: { version: SCHEMA_VERSION, pages }, warnings };
+  // Document properties the editor does not use (schemaVersion, fonts, audios, unit, dpi ...) are kept.
+  const docExtra = collectExtras(doc as Record<string, unknown>, writePolotnoDocumentShell({ width: docWidth, height: docHeight }, []), DEFAULT_ONLY_DOCUMENT_KEYS, ["pages"]);
+  return { document: { version: SCHEMA_VERSION, pages, ...(docExtra ? { polotno: docExtra } : {}) }, warnings };
 }
 
 // ------------------------- KusukaEdit -> Polotno --------------------------
@@ -1209,7 +1237,103 @@ function textEffectsToPolotno(el: TextElement): Record<string, unknown> {
   return out;
 }
 
+// ------------------------- Polotno passthrough (v6) -------------------------
+
+/**
+ * Properties that the export only writes as a DEFAULT ("" name, visible, not
+ * locked, top-aligned ...): a value from the original file always wins over them.
+ */
+const DEFAULT_ONLY_ELEMENT_KEYS = new Set([
+  "name",
+  "visible",
+  "selectable",
+  "removable",
+  "alwaysOnTop",
+  "showInExport",
+  "placeholder",
+  "verticalAlign",
+  "draggable",
+  "contentEditable",
+  "styleEditable",
+  "resizable",
+]);
+const DEFAULT_ONLY_PAGE_KEYS = new Set(["bleed", "duration"]);
+const DEFAULT_ONLY_DOCUMENT_KEYS = new Set(["schemaVersion", "unit", "dpi", "fonts", "audios"]);
+/** The `custom` keys this editor writes itself (anything else in `custom` belongs to the file). */
+const OWN_CUSTOM_KEYS = new Set(["source", "listType", "autoFit", "dash", "filterPreset"]);
+
+/**
+ * What of a Polotno object (`raw`) the export would NOT give back by itself:
+ * every key the export does not write (`written`), plus the default-only keys,
+ * plus the foreign keys of `custom`. undefined when there is nothing to keep.
+ */
+function collectExtras(
+  raw: Record<string, unknown>,
+  written: Record<string, unknown>,
+  defaultOnly: Set<string>,
+  skip: readonly string[] = []
+): Record<string, unknown> | undefined {
+  const extra: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (key === "custom" || skip.includes(key) || value === undefined) continue;
+    // A default-only key is kept only when the file says something else than
+    // the default the export writes (a file this editor wrote keeps nothing).
+    const differs = defaultOnly.has(key) && JSON.stringify(written[key]) !== JSON.stringify(value);
+    if (!(key in written) || differs) extra[key] = value;
+  }
+  if (isRecord(raw.custom)) {
+    const foreign = Object.fromEntries(Object.entries(raw.custom).filter(([k]) => !OWN_CUSTOM_KEYS.has(k)));
+    if (Object.keys(foreign).length > 0) extra.custom = foreign;
+  } else if (raw.custom !== undefined && raw.custom !== null) {
+    extra.custom = raw.custom; // not an object: kept as it was
+  }
+  return Object.keys(extra).length > 0 ? extra : undefined;
+}
+
+/** `written` with the kept properties put back (an edited value always wins, see collectExtras). */
+function withExtras<T extends Record<string, unknown>>(
+  written: T,
+  extra: Record<string, unknown> | undefined,
+  defaultOnly: Set<string>
+): T {
+  if (!extra) return written;
+  const out: Record<string, unknown> = { ...written };
+  for (const [key, value] of Object.entries(extra)) {
+    if (key === "custom") continue;
+    if (!(key in written) || defaultOnly.has(key)) out[key] = value;
+  }
+  if (extra.custom !== undefined) {
+    out.custom = isRecord(extra.custom) && isRecord(written.custom)
+      ? { ...extra.custom, ...written.custom }
+      : isRecord(written.custom)
+        ? written.custom
+        : extra.custom;
+  }
+  return out as T;
+}
+
+/** A JSON-safe copy of a kept-properties record from a native file, or undefined. */
+function readKeptProperties(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value) || Object.keys(value).length === 0) return undefined;
+  try {
+    return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The Polotno properties of an imported element that the export would lose (see collectExtras). */
+function elementExtras(child: Record<string, unknown>, el: CanvasElement): Record<string, unknown> | undefined {
+  // `id` is ours (it may have been renamed to stay unique); `children` would be a group's.
+  return collectExtras(child, writePolotnoElement(el), DEFAULT_ONLY_ELEMENT_KEYS, ["id", "children"]);
+}
+
 function toPolotnoElement(el: CanvasElement): PolotnoElement {
+  return withExtras(writePolotnoElement(el), el.polotno, DEFAULT_ONLY_ELEMENT_KEYS);
+}
+
+/** The Polotno element for `el`, from the editor's own state only (no kept properties). */
+function writePolotnoElement(el: CanvasElement): PolotnoElement {
   if (el.type === "text") {
     // Undo the import tolerance: Polotno gets back the box it came with.
     const pad = el.widthTolerance !== undefined && el.widthTolerance > 0 ? el.widthTolerance : 0;
@@ -1244,6 +1368,9 @@ function toPolotnoElement(el: CanvasElement): PolotnoElement {
       ...shadowToPolotno(el),
       ...filters,
       ...textEffectsToPolotno(el),
+      ...(el.borderSize && el.borderSize > 0
+        ? { borderColor: el.borderColor ?? "#000000", borderSize: el.borderSize }
+        : {}),
     };
     // Only a width measured here (no tolerance) is marked as such, so it is
     // not padded a second time when this file is imported again. List,
@@ -1303,9 +1430,18 @@ function toPolotnoPage(page: Page, doc: { width: number; height: number }): Polo
   // A page of the document's size says "auto"; one of its own size says so.
   const sameWidth = page.canvas.width === doc.width;
   const sameHeight = page.canvas.height === doc.height;
+  return withExtras(writePolotnoPageShell(page, sameWidth, sameHeight, ordered.map(toPolotnoElement)), page.polotno, DEFAULT_ONLY_PAGE_KEYS);
+}
+
+function writePolotnoPageShell(
+  page: Pick<Page, "id" | "canvas">,
+  sameWidth: boolean,
+  sameHeight: boolean,
+  children: PolotnoElement[]
+): PolotnoPage {
   return {
     id: page.id,
-    children: ordered.map(toPolotnoElement),
+    children,
     width: sameWidth ? "auto" : page.canvas.width,
     height: sameHeight ? "auto" : page.canvas.height,
     background: page.canvas.backgroundColor,
@@ -1322,6 +1458,10 @@ function toPolotnoPage(page: Page, doc: { width: number; height: number }): Polo
 export function convertKusukaToPolotno(doc: CanvasDocument): PolotnoDocument {
   const first = doc.pages[0]?.canvas ?? DEFAULT_CANVAS;
   const size = { width: first.width, height: first.height };
+  return withExtras(writePolotnoDocumentShell(size, doc.pages.map((page) => toPolotnoPage(page, size))), doc.polotno, DEFAULT_ONLY_DOCUMENT_KEYS);
+}
+
+function writePolotnoDocumentShell(size: { width: number; height: number }, pages: PolotnoPage[]): PolotnoDocument {
   return {
     schemaVersion: POLOTNO_SCHEMA_VERSION,
     width: size.width,
@@ -1329,7 +1469,7 @@ export function convertKusukaToPolotno(doc: CanvasDocument): PolotnoDocument {
     unit: "px",
     dpi: 72,
     fonts: [],
-    pages: doc.pages.map((page) => toPolotnoPage(page, size)),
+    pages,
     audios: [],
   };
 }

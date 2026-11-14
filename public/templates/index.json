@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "id": "presentasi-3-slide",
+      "name": "Presentasi 3 slide",
+      "description": "Sampul, agenda, penutup",
+      "file": "presentasi-3-slide.polotno.json",
+      "thumbnail": "thumbs/presentasi-3-slide.svg",
+      "pages": 3,
+      "width": 1280,
+      "height": 720
+    },
+    {
+      "id": "brosur-2-halaman",
+      "name": "Brosur 2 halaman",
+      "description": "Muka dan belakang, A4",
+      "file": "brosur-2-halaman.polotno.json",
+      "thumbnail": "thumbs/brosur-2-halaman.svg",
+      "pages": 2,
+      "width": 794,
+      "height": 1123
+    },
+    {
+      "id": "carousel-4-slide",
+      "name": "Carousel Instagram",
+      "description": "Empat slide persegi",
+      "file": "carousel-4-slide.polotno.json",
+      "thumbnail": "thumbs/carousel-4-slide.svg",
+      "pages": 4,
+      "width": 1080,
+      "height": 1080
+    },
+    {
+      "id": "kartu-nama-2-sisi",
+      "name": "Kartu nama",
+      "description": "Depan dan belakang",
+      "file": "kartu-nama-2-sisi.polotno.json",
+      "thumbnail": "thumbs/kartu-nama-2-sisi.svg",
+      "pages": 2,
+      "width": 1050,
+      "height": 600
+    },
+    {
+      "id": "undangan-story-3",
+      "name": "Undangan story",
+      "description": "Tiga layar 9:16",
+      "file": "undangan-story-3.polotno.json",
+      "thumbnail": "thumbs/undangan-story-3.svg",
+      "pages": 3,
+      "width": 1080,
+      "height": 1920
+    },
+    {
+      "id": "katalog-produk-2-halaman",
+      "name": "Katalog produk",
+      "description": "Gambar dengan filter, blur, dan sudut bulat",
+      "file": "katalog-produk-2-halaman.polotno.json",
+      "thumbnail": "thumbs/katalog-produk-2-halaman.svg",
+      "pages": 2,
+      "width": 1080,
+      "height": 1080
+    },
+    {
+      "id": "paket-feed-dan-story",
+      "name": "Paket feed + story",
+      "description": "Dua halaman, dua ukuran berbeda",
+      "file": "paket-feed-dan-story.polotno.json",
+      "thumbnail": "thumbs/paket-feed-dan-story.svg",
+      "pages": 2,
+      "width": 1080,
+      "height": 1080
+    },
+    {
+      "id": "promo-diskon",
+      "name": "Promo diskon",
+      "description": "Satu halaman",
+      "file": "promo-diskon.polotno.json",
+      "thumbnail": "thumbs/promo-diskon.svg",
+      "pages": 1,
+      "width": 900,
+      "height": 600
+    },
+    {
+      "id": "post-sosmed",
+      "name": "Post media sosial",
+      "description": "Satu halaman",
+      "file": "post-sosmed.polotno.json",
+      "thumbnail": "thumbs/post-sosmed.svg",
+      "pages": 1,
+      "width": 600,
+      "height": 600
+    },
+    {
+      "id": "poster-acara",
+      "name": "Poster acara",
+      "description": "Satu halaman",
+      "file": "poster-acara.polotno.json",
+      "thumbnail": "thumbs/poster-acara.svg",
+      "pages": 1,
+      "width": 900,
+      "height": 600
+    },
+    {
+      "id": "kartu-kutipan",
+      "name": "Kartu kutipan",
+      "description": "Satu halaman",
+      "file": "kartu-kutipan.polotno.json",
+      "thumbnail": "thumbs/kartu-kutipan.svg",
+      "pages": 1,
+      "width": 900,
+      "height": 600
+    }
+  ]
+}

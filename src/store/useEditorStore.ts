@@ -164,6 +164,12 @@ export interface EditorState {
   // a freshly loaded design whole again (zoom "Fit"), even when the new
   // document happens to have the same size as the old one. Never in history.
   loadRevision: number;
+  /**
+   * Document-level Polotno properties of the file that was opened (schemaVersion,
+   * fonts, audios ...), written back by a Polotno export. Not part of the undo
+   * history: it describes the opened file, not an edit.
+   */
+  documentPolotno?: Record<string, unknown>;
 
   // Set while a "all pages" image export walks through the pages. View state:
   // the canvas shows a progress cover and ignores input while it is set.
@@ -433,6 +439,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     croppingId: null,
     stageNode: null,
     loadRevision: 0,
+    documentPolotno: undefined,
     exportProgress: null,
     past: [],
     future: [],
@@ -972,8 +979,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     exportToJSON: async (format = "kusuka") => {
       // Snapshot the document first; the user may keep editing while the
       // pictures are being read, and the file must reflect ONE moment.
-      const { pages } = get();
-      const doc: CanvasDocument = { version: SCHEMA_VERSION, pages };
+      const { pages, documentPolotno } = get();
+      const doc: CanvasDocument = { version: SCHEMA_VERSION, pages, ...(documentPolotno ? { polotno: documentPolotno } : {}) };
 
       // blob: URLs die with the page, so uploaded pictures are embedded as
       // data: URLs in the exported copy (the live elements are untouched).
@@ -999,6 +1006,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         currentPageIndex: 0,
         ...NO_SELECTION,
         loadRevision: get().loadRevision + 1,
+        documentPolotno: parsed.document.polotno,
       });
       markViewAfterLastStep(0); // Redo opens the imported document on its first page
       releaseOrphanUrls();
@@ -1016,6 +1024,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         pages: [createBlankPage(DEFAULT_CANVAS)],
         currentPageIndex: 0,
         ...NO_SELECTION,
+        documentPolotno: undefined,
       });
       markViewAfterLastStep(0);
       releaseOrphanUrls();

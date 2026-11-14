@@ -4,8 +4,20 @@ Prototipe / MVP komponen design editor kanvas untuk Next.js, terinspirasi dari
 arsitektur [Polotno](https://polotno.com/). Dibangun dengan **React-Konva**
 untuk rendering kanvas, dan **Zustand** untuk state management.
 
-Status: **MVP kerja praktek, versi 10** (paket `0.10.0`, rilis "KusukaEdit Ver 0.8") — versi
-ini menerjemahkan **efek visual Polotno tanpa peringatan**: blur dan filter warna kini berlaku
+Status: **MVP kerja praktek, versi 11** (paket `0.11.0`, rilis "KusukaEdit Ver 0.9") — versi
+ini menambahkan:
+
+- **pustaka template** di `public/templates/` (katalog `index.json`, thumbnail SVG, berkas
+  Polotno yang diunduh saat dipilih), plus **Template saya** untuk menyimpan dan mengunggah
+  template sendiri;
+- **preset efek teks** (Tanpa, Bayangan, Angkat, Pendar, Garis tepi, Stiker, Pop, Latar) dan
+  **garis tepi kotak latar**;
+- **toolbar yang dirapikan** per kategori;
+- **adapter Polotno yang benar-benar pulang-pergi identik**: properti yang tidak dipakai
+  editor disimpan dan ditulis kembali (skema native **v6**);
+- **Next.js `^14.2.35`** dengan `package-lock.json`.
+
+Versi 10 (rilis "Ver 0.8") menerjemahkan **efek visual Polotno tanpa peringatan**: blur dan filter warna kini berlaku
 untuk teks dan bentuk, ditambah **garis putus-putus** (`dash`), **latar teks** (kotak per baris
 dengan sudut membulat dan padding yang mengikuti ukuran huruf), dan **teks melengkung**. Semuanya
 masuk skema JSON native **v5**, digambar di kanvas (teks kini sebuah `Group`), diatur dari satu
@@ -47,6 +59,8 @@ auto-fit teks; skema JSON native v4.
 - [Efek lintas elemen (teks, bentuk, gambar)](#efek-lintas-elemen-teks-bentuk-gambar)
 - [Efek Polotno tanpa peringatan (v10)](#efek-polotno-tanpa-peringatan-v10)
 - [Pemuat font Google (v10)](#pemuat-font-google-v10)
+- [Efek teks ala Polotno: preset & kotak latar (v11)](#efek-teks-ala-polotno-preset--kotak-latar-v11)
+- [Toolbar kontekstual yang dirapikan (v11)](#toolbar-kontekstual-yang-dirapikan-v11)
 - [Toolbar kontekstual ala Polotno](#toolbar-kontekstual-ala-polotno)
 - [Seleksi ganda: kotak seret & Ctrl/Cmd+klik](#seleksi-ganda-kotak-seret--ctrlcmdklik)
 - [Auto-fit teks (kecilkan otomatis)](#auto-fit-teks-kecilkan-otomatis)
@@ -54,11 +68,12 @@ auto-fit teks; skema JSON native v4.
 - [Copy & Paste elemen](#copy--paste-elemen-ctrlc--ctrlv)
 - [Undo / Redo](#sistem-undo--redo-history-stack)
 - [Export ke gambar (satu halaman atau semua)](#export-ke-gambar-png--jpg)
-- [Skema JSON native (v5)](#skema-dokumen-json-native-v5)
+- [Skema JSON native (v6)](#skema-dokumen-json-native-v6)
 - [Adapter Polotno (dua arah, semua halaman)](#adapter-polotno-import--export-dua-arah)
-- [Template](#template-galeri-preset)
+- [Template (pustaka public/templates)](#template-pustaka-publictemplates)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Docker](#containerization-docker)
+- [Pembaruan keamanan dependensi (v11)](#pembaruan-keamanan-dependensi-v11)
 - [Catatan pengujian](#catatan-pengujian)
 - [Roadmap](#roadmap-berikutnya)
 
@@ -97,10 +112,14 @@ auto-fit teks; skema JSON native v4.
       otomatis ke sisa ruang (diuji pada 1440, 900, dan 420 px)
 - [x] **Export / Import JSON** dengan dua pilihan format: **Native (KusukaEdit)**
       dan **Polotno-compatible**; format file terdeteksi otomatis saat import
-- [x] **Galeri template**: 11 kartu thumbnail — 7 berkas format Polotno (beberapa
-      multi-halaman) yang ada di `src/templates/polotno/` dan 4 preset lama; klik
-      kartu → berkas lewat deteksi adapter → seluruh halaman dan elemen dibangun
-      ulang di store
+- [x] **Pustaka template** (v11): 11 template Polotno di `public/templates/` dengan
+      katalog `index.json` dan thumbnail SVG; JSON diunduh saat kartu dipilih → adapter →
+      seluruh halaman dibangun ulang di store; **Template saya** (simpan desain / unggah
+      berkas, localStorage)
+- [x] **Preset efek teks** (v11): Tanpa, Bayangan, Angkat, Pendar, Garis tepi, Stiker, Pop,
+      Latar; garis tepi kotak latar (`borderColor`/`borderSize`)
+- [x] **Adapter Polotno identik pulang-pergi** (v11): properti yang tidak dipakai editor
+      disimpan di `polotno` (elemen/halaman/dokumen) dan ditulis kembali
 - [x] **Export gambar** PNG/JPG (1x/2x/3x) lewat `stage.toDataURL()`, dengan
       batas ukuran aman dan keterangan ukuran hasil
 - [x] **Adapter Polotno yang disempurnakan**: struktur bertingkat → array datar,
@@ -170,7 +189,7 @@ auto-fit teks; skema JSON native v4.
 - [x] **Pemuat font Google** (v10): font dimuat lewat `<link>` + `document.fonts.load()`
       sebelum teks diukur ulang; pemilih font berisi 20 keluarga
 - [x] **Ikon perataan tiga garis** (v10) untuk semua opsi perataan
-- [x] **Test suite** (`npm test`, 266 tes) untuk adapter, store dan halaman, memori
+- [x] **Test suite** (`npm test`, 277 tes) untuk adapter, store dan halaman, memori
       gambar, ukuran kanvas, zoom, export, ZIP, template, crop, drop, filter, efek gambar,
       efek lintas elemen, opsi teks, auto-fit, marquee, seleksi ganda, dan efek v10
 
@@ -182,8 +201,14 @@ canvas-editor/
 │   ├── layout.tsx                 # Root layout (Server Component)
 │   ├── page.tsx                   # Halaman utama, merender <EditorRoot />
 │   └── globals.css
+├── public/templates/              # v11: pustaka template (disajikan statis)
+│   ├── index.json                 # Katalog: id, nama, deskripsi, berkas, thumbnail, halaman, ukuran
+│   ├── *.polotno.json             # 11 dokumen format Polotno
+│   └── thumbs/*.svg               # Pratinjau halaman pertama (dibuat oleh npm run templates:build)
+├── scripts/
+│   └── build-template-thumbnails.ts # Membuat thumbs/*.svg dan mengisi angka di index.json
 ├── src/
-│   ├── types/editor.ts            # Skema TypeScript: Page, CanvasDocument (native v5), elemen
+│   ├── types/editor.ts            # Skema TypeScript: Page, CanvasDocument (native v6), elemen
 │   ├── store/
 │   │   ├── useEditorStore.ts      # Zustand: pages + currentPageIndex, history, clipboard, actions, JSON
 │   │   └── selectors.ts           # selectCurrentPage / selectCanvas / selectElements / selectElementById
@@ -208,6 +233,8 @@ canvas-editor/
 │   │   ├── textEffects.ts         # v10: dash (+ satuan Polotno), kotak latar teks per baris, geometri busur teks lengkung (murni)
 │   │   ├── fontLoader.ts          # v10: ensureFontLoaded() — Google Fonts <link> + document.fonts.load(), daftar font
 │   │   ├── useNodeFilters.ts      # v10: hook blur + filter warna (cache Konva) untuk teks dan bentuk
+│   │   ├── templateLibrary.ts     # v11: katalog template (validasi, fetch) + Template saya (localStorage)
+│   │   ├── textEffectPresets.ts   # v11: preset efek teks (patch + deteksi), murni
 │   │   ├── textFit.ts             # Auto-fit teks: bungkus kata seperti Konva + cari ukuran huruf terbesar yang muat (murni)
 │   │   ├── selection.ts           # Marquee: kotak dari dua titik, perpotongan kotak berotasi (SAT), hasil seleksi (murni)
 │   │   ├── transform.ts           # Transformer -> field elemen ("bake" skala ke lebar/tinggi/ukuran huruf) (murni)
@@ -220,20 +247,6 @@ canvas-editor/
 │   │   ├── batchExport.ts         # Urutan render semua halaman, nama berkas, waitUntil (murni, diuji di Node)
 │   │   ├── exportPages.ts         # Export semua halaman -> ZIP (menyentuh store, Stage, browser)
 │   │   └── zipStore.ts            # Penulis ZIP tanpa kompresi (CRC32, UTF-8) — tanpa dependensi
-│   ├── templates/
-│   │   ├── index.ts               # Registry template (11 entri)
-│   │   ├── polotno/               # 7 dokumen format Polotno asli (multi-halaman)
-│   │   │   ├── presentasi-3-slide.polotno.json
-│   │   │   ├── brosur-2-halaman.polotno.json
-│   │   │   ├── carousel-4-slide.polotno.json
-│   │   │   ├── kartu-nama-2-sisi.polotno.json
-│   │   │   ├── undangan-story-3.polotno.json
-│   │   │   ├── katalog-produk-2-halaman.polotno.json
-│   │   │   └── paket-feed-dan-story.polotno.json
-│   │   ├── poster-acara.kusuka.json
-│   │   ├── kartu-kutipan.kusuka.json
-│   │   ├── promo-diskon.polotno.json
-│   │   └── post-sosmed.polotno.json
 │   └── components/
 │       ├── EditorRoot.tsx         # Wrapper client + dynamic import (ssr:false); susunan toolbar, panel gaya, kanvas, strip halaman
 │       ├── CanvasWorkspace.tsx    # Stage/Layer/Transformer (banyak node) + marquee + skala tampilan + keyboard shortcut + drag-and-drop + penutup progres export
@@ -243,7 +256,8 @@ canvas-editor/
 │       ├── TextEditorOverlay.tsx  # <textarea> untuk edit teks di tempat
 │       ├── SidePanel.tsx          # Rel tab vertikal: Elemen / Gambar / Template / Kanvas
 │       ├── WorkspacePanel.tsx     # Ukuran, rasio, latar kanvas (+ "Terapkan ke semua halaman")
-│       ├── TemplatePanel.tsx      # Kartu template (thumbnail, jumlah halaman, lencana format)
+│       ├── TemplatePanel.tsx      # Tab Template: Template saya (simpan/unggah/hapus) + galeri dari /templates/index.json
+│       ├── TextEffectPresets.tsx  # v11: baris preset "Gaya teks" di popover Efek teks
 │       ├── TemplateThumbnail.tsx  # Thumbnail SVG satu halaman (juga dipakai strip halaman)
 │       ├── ContextualToolbar.tsx  # Toolbar satu baris ala Polotno (teks / gambar / bentuk / seleksi ganda) + popover (Efek v10)
 │       ├── DashPicker.tsx         # v10: pilihan pola garis (utuh / putus-putus / garis panjang / titik-titik)
@@ -262,6 +276,8 @@ canvas-editor/
 │   ├── templates.test.ts          # Semua template dan contoh (28 tes)
 │   ├── v4-effects-selection.test.ts # Efek lintas elemen, opsi teks, auto-fit, marquee, seleksi ganda (23 tes)
 │   ├── ui-flow.test.ts            # Pratinjau impor, pilihan ekspor, skala gambar di crop (6 tes)
+│   ├── v5-effects-text.test.ts    # Efek v10: dash, latar teks, teks lengkung, font (13 tes)
+│   ├── v6-library-lossless.test.ts # v11: pustaka template, preset efek teks, pulang-pergi Polotno identik (11 tes)
 │   ├── helpers.ts                 # E(), C(), onePage(), mkPage(): jalan pintas untuk dokumen berhalaman
 │   ├── harness.ts                 # Test runner kecil (tanpa dependensi)
 │   ├── stubs/                     # Pengganti tipis zustand & uuid agar jalan di Node
@@ -293,7 +309,7 @@ Buka `http://localhost:3000`.
 
 ## Panduan Integrasi ke Proyek Next.js Lain
 
-Salin folder `src/store`, `src/lib`, `src/templates`, dan `src/components`, serta
+Salin folder `src/store`, `src/lib`, dan `src/components`, folder `public/templates`, serta
 aturan CSS di `app/globals.css` (kelas `.stage-wrap`, `.text-editor*`,
 `.template-*`, `.workspace-panel`, `.chip*`, `.swatch*`, `.size-grid*`,
 `.error-note`, `.warning-note`, `.warning-list`; tanpanya overlay edit teks tidak
@@ -1264,6 +1280,58 @@ New Roman, dan Verdana. Font lain dari berkas impor tetap muncul di daftar dan i
 Font yang benar sudah menghilangkan penyebab utama "SALE" turun baris, tetapi toleransi tetap
 berguna bila font gagal dimuat (luring, keluarga tidak ada di Google Fonts).
 
+## Efek teks ala Polotno: preset & kotak latar (v11)
+
+Popover **✦ Efek** milik teks kini dibuka dengan baris **Gaya teks**: delapan kartu
+"Ag" yang memperlihatkan efeknya (`TextEffectPresets.tsx`, `lib/textEffectPresets.ts`).
+
+| Preset | Yang diatur (ukuran mengikuti `fontSize`) |
+|---|---|
+| Tanpa | semua efek di bawah dihapus |
+| Bayangan | bayangan hitam 50 %, blur 0,12·fs, geser 0,06·fs |
+| Angkat | bayangan lebar ke bawah: blur 0,45·fs, geser Y 0,12·fs, 35 % |
+| Pendar | bayangan **berwarna teks**, blur 0,5·fs, tanpa geser, 90 % |
+| Garis tepi | garis huruf hitam/putih (kontras dengan warna teks), 0,05·fs |
+| Stiker | garis putih tebal 0,14·fs + bayangan tipis |
+| Pop | bayangan tegas `#ff3d7f` tanpa blur, geser 0,07·fs |
+| Latar | kotak latar (gelap untuk teks terang, kuning untuk teks gelap), sudut & padding 0,5 |
+
+- Preset **bukan field baru**. Ia adalah *patch* untuk field yang sudah ada (`shadow*`,
+  `stroke`/`strokeWidth`, `background*`, `borderColor`/`borderSize`), sehingga teks
+  bergaya tetap ditulis ke Polotno dengan properti Polotno sendiri.
+- Setiap patch berisi **semua** field efek; yang tidak dipakai bernilai `undefined` dan
+  dihapus oleh `updateElement`. Jadi berganti preset tidak meninggalkan campuran.
+- Satu klik preset = satu langkah undo (diuji).
+- Kartu yang aktif dihitung ulang dari field teks (`detectTextEffect`). "Latar" tetap aktif
+  saat warna, padding, sudut, atau garis tepinya diatur. Bila efek diubah manual, judulnya
+  menjadi "Gaya teks (disesuaikan)".
+
+Di bawah baris preset ada pengaturan rinci: transparansi, garis tepi huruf + pola garis,
+dan **Latar teks**:
+
+- sakelar dan warna, kepekatan, sudut (%), jarak/padding (%);
+- **Garis tepi kotak** (v11): warna dan tebal, yaitu `borderColor`/`borderSize` Polotno.
+
+Setelah itu: teks lengkung, bayangan, blur & filter. Garis tepi kotak digambar sepanjang
+kotak latar per baris. Bila latar mati, ia membingkai seluruh kotak teks dengan padding yang
+sama. Kepekatan latar dimasukkan ke warna isi (`rgba`), jadi garis tepinya tetap pekat.
+
+## Toolbar kontekstual yang dirapikan (v11)
+
+- **Kategori**: kontrol dikelompokkan dalam `.tbar-group` (teks: font · gaya · perataan ·
+  paragraf · efek; bentuk: isi · garis · sudut · efek; gambar: pangkas · tampilan · ganti).
+  Antar-kelompok ada garis pemisah 1 px yang halus. Jarak di dalam kelompok 4 px, padding
+  kelompok 8 px, dan semua kontrol setinggi 30 px.
+- **Kondisi ketat**:
+  - Teks **lengkung** tidak menampilkan tombol perataan, daftar, dan auto-fit, karena
+    ketiganya tidak berpengaruh pada satu baris di atas busur. Kelompok yang menjadi kosong
+    disembunyikan (`:empty`).
+  - Tombol **Reset** crop hanya muncul bila gambar memang terpangkas.
+  - Sudut membulat hanya untuk persegi.
+- **Tombol Hapus tidak pernah tertimpa**: yang bergulir ke samping kini hanya
+  `.toolbar__row`. Menu lapisan dan **Hapus** (`.toolbar__end`) tetap di kanan dengan garis
+  pemisah. Popover mengikuti gulir baris itu.
+
 ## Toolbar kontekstual ala Polotno
 
 `src/components/ContextualToolbar.tsx`. Satu baris kontrol ringkas untuk elemen yang
@@ -1604,7 +1672,11 @@ gagal), dan export paralel (satu Stage = satu halaman sekali waktu).
 
 ---
 
-## Skema Dokumen JSON Native (v5)
+## Skema Dokumen JSON Native (v6)
+
+> **v6 (v11 editor):** field opsional baru — `borderColor`/`borderSize` di teks (garis tepi
+> kotak latar), dan `polotno` di elemen, halaman, dan dokumen (properti Polotno yang
+> disimpan untuk pulang-pergi identik). Berkas v5 dibaca apa adanya.
 
 > **v5 (v10 editor):** hanya menambah field opsional — `blurRadius`, `brightness`,
 > `contrast`, `saturation`, `filterPreset`, dan `dash` di semua elemen, serta
@@ -1622,7 +1694,7 @@ halaman tempat elemen berada.
 
 ```jsonc
 {
-  "version": 5,                 // versi skema (lihat "Migrasi")
+  "version": 6,                 // versi skema (lihat "Migrasi")
   "pages": [
     {
       "id": "page-1",           // unik di seluruh dokumen
@@ -1709,13 +1781,15 @@ Contoh lengkap: [`examples/sample-design.json`](./examples/sample-design.json) (
 dan [`examples/sample-multipage.json`](./examples/sample-multipage.json) (tiga halaman,
 dua ukuran berbeda).
 
-### Migrasi v1 → v2 → v3 → v4 → v5
+### Migrasi v1 → v2 → v3 → v4 → v5 → v6
 
-- **v5** (sekarang): bentuk sama dengan v4; yang baru hanya field **opsional** —
+- **v6** (sekarang): field opsional `borderColor`/`borderSize` pada teks dan `polotno` pada
+  elemen/halaman/dokumen. Berkas v5 dibuka apa adanya; berkas versi 7 ke atas ditolak.
+- **v5**: bentuk sama dengan v4; yang baru hanya field **opsional** —
   `blurRadius`, `brightness`, `contrast`, `saturation`, `filterPreset`, `dash` pada semua tipe
   elemen, serta `backgroundEnabled`/`backgroundColor`/`backgroundOpacity`/
   `backgroundCornerRadius`/`backgroundPadding` dan `curveEnabled`/`curvePower` pada teks.
-  Berkas v4 dibuka apa adanya, tanpa peringatan; berkas versi 6 ke atas ditolak.
+  Berkas v4 dibuka apa adanya, tanpa peringatan.
 - **v4**: bentuk sama dengan v3; yang baru hanya field **opsional** —
   `opacity` dan `shadow*` pada semua tipe elemen, serta `stroke`/`strokeWidth`,
   `textDecoration`, `letterSpacing`, `textTransform`, `listType`, `autoFit`, dan
@@ -2075,6 +2149,44 @@ Pemilihan format ada di menu **Ekspor** di header (**JSON KusukaEdit** / **JSON
 Polotno**); kartu **Proyek desain** di tab Impor selalu mendeteksi format dari isi berkas
 (bukan dari nama file) dan menampilkannya di pratinjau sebelum berkas dibuka.
 
+### Pulang-pergi tanpa kehilangan (v11, skema v6)
+
+Properti Polotno yang **tidak dipakai editor** kini disimpan apa adanya dan ditulis
+kembali saat ekspor:
+
+| Tingkat | Tempat simpan | Contoh |
+|---|---|---|
+| Elemen | `element.polotno` | `name`, `selectable`/`removable`/`alwaysOnTop`, `verticalAlign`, `blendMode`, `animations`, `contentEditable`, `keepRatio`, kunci `custom` milik aplikasi lain, efek yang mati (`shadowEnabled: false` + nilainya) |
+| Halaman | `page.polotno` | `bleed`, `duration`, `custom` |
+| Dokumen | `document.polotno` (store: `documentPolotno`) | `schemaVersion`, `fonts`, `audios`, `unit`, `dpi`, `custom` |
+
+Aturannya (`collectExtras` / `withExtras` di `polotnoAdapter.ts`):
+
+1. Saat impor, yang disimpan adalah kunci yang **tidak akan ditulis** oleh ekspor editor,
+   ditambah kunci "default saja" (`name`, `visible`, `verticalAlign`, `bleed`,
+   `schemaVersion`…) **bila nilainya berbeda** dari default yang ditulis editor. Akibatnya,
+   berkas buatan editor ini tidak menyimpan apa-apa.
+2. Saat ekspor, nilai yang dikelola editor **selalu diambil dari state editor**: teks yang
+   diedit atau latar yang dimatikan menang atas salinan lama. Kunci simpanan hanya mengisi
+   sisanya. `custom` digabung.
+3. Ikut tersimpan di berkas JSON native (divalidasi sebagai JSON biasa), jadi alur Polotno →
+   simpan native → buka lagi → ekspor Polotno tetap identik.
+
+**Diuji:** dokumen Polotno berisi teks berlatar + garis tepi kotak + animasi + `custom`,
+persegi `dash`, foto ber-`flipX`, halaman ber-`bleed`/`duration`, dan dokumen ber-`fonts`/`dpi
+300`/`schemaVersion 5` → impor → ekspor menghasilkan objek yang **`deepEqual` dengan
+aslinya**. Hal yang sama berlaku lewat store (`loadFromJSON` → `exportToJSON("polotno")`)
+dan lewat berkas native.
+
+**Pengecualian yang tetap ada** (karena isinya memang diubah editor, bukan dibuang):
+
+- Warna yang ditulis dengan nama atau `rgb()` kembali sebagai `#rrggbb`.
+- Teks HTML kembali sebagai teks polos.
+- Halaman berukuran sama dengan dokumen ditulis `"auto"`.
+- Elemen tersembunyi (`visible: false`) dan grup tidak diimpor (dilaporkan).
+- Bentuk teks lengkung di aplikasi Polotno sendiri mungkin berbeda; lihat
+  "Belum diuji".
+
 ### Kompatibilitas: apa yang sudah dan belum dipastikan
 
 - Nama properti, nilai default, `schemaVersion: 4`, dan struktur halaman dicocokkan
@@ -2129,63 +2241,79 @@ Polotno**); kartu **Proyek desain** di tab Impor selalu mendeteksi format dari i
 
 ---
 
-## Template (galeri preset)
+## Template (pustaka `public/templates`)
 
-Tab **Template** di panel kiri menampilkan **11 kartu visual**: thumbnail halaman
-pertama (bertumpuk bila dokumennya lebih dari satu halaman), nama, deskripsi satu
-baris, dan lencana **jumlah halaman** serta **format file** (Native / Polotno). Preset
-disimpan di repositori sebagai berkas JSON — **tujuh di antaranya adalah dokumen format
-Polotno** di `src/templates/polotno/`:
+Sejak v11 template **tidak lagi di-*bundle*** ke JavaScript. Template adalah berkas statis
+yang diunduh saat dibutuhkan:
 
-| Berkas | Format | Halaman | Ukuran |
-|---|---|---|---|
-| `polotno/presentasi-3-slide.polotno.json` | Polotno | 3 | 1280×720 |
-| `polotno/brosur-2-halaman.polotno.json` | Polotno | 2 | 794×1123 (A4) |
-| `polotno/carousel-4-slide.polotno.json` | Polotno | 4 | 1080×1080 |
-| `polotno/kartu-nama-2-sisi.polotno.json` | Polotno | 2 | 1050×600 |
-| `polotno/undangan-story-3.polotno.json` | Polotno | 3 | 1080×1920 (gambar bermask lingkaran + garis + bayangan) |
-| `polotno/katalog-produk-2-halaman.polotno.json` | Polotno | 2 | 1080×1080 (kecerahan, sepia, hitam-putih, kontras+saturasi, blur, sudut membulat, mask) |
-| `polotno/paket-feed-dan-story.polotno.json` | Polotno | 2 | **1080×1080 dan 1080×1920** dalam satu berkas |
-| `promo-diskon.polotno.json` | Polotno | 1 | 900×600 |
-| `post-sosmed.polotno.json` | Polotno | 1 | 600×600 |
-| `poster-acara.kusuka.json` | Native | 1 | 900×600 |
-| `kartu-kutipan.kusuka.json` | Native | 1 | 900×600 |
-
-Berkas Polotno ditulis dengan struktur skema Polotno (`schemaVersion`, `pages[].children`,
-`width`/`height` halaman `"auto"` atau angka, dst.) oleh skrip pembangkit sekali pakai;
-yang menjadi sumber kebenaran adalah **berkas JSON-nya**, bukan skrip itu. Semua template
-**dimuat tanpa peringatan** (diuji): tidak ada yang memakai fitur yang belum didukung.
-
-Cara kerja:
-
-1. `TemplatePanel` melewatkan setiap template melalui `parseDocument()`, yang
-   **mendeteksi formatnya** — registry tidak perlu tahu format tiap berkas.
-2. Halaman pertama dokumen hasil konversi digambar sebagai thumbnail SVG
-   (`TemplateThumbnail.tsx`). Karena digambar dari dokumen *setelah* adapter,
-   thumbnail selalu sinkron dengan berkas template, dan untuk template Polotno
-   sekaligus memperlihatkan hasil konversinya (termasuk crop, cermin, sudut membulat,
-   mask, dan filter warna lewat `feColorMatrix`).
-3. Klik kartu → `loadFromJSON(entry.data)`: berkas yang sama dengan yang dipilih lewat
-   tombol Import melewati fungsi deteksi adapter, **seluruh halaman dan elemennya
-   dibangun ulang** di store (halaman pertama tampil, seleksi direset), dan seluruh
-   dokumen diganti sebagai **satu langkah undo** — `Ctrl+Z` mengembalikan desain
-   sebelumnya. Pemetaan bersifat deterministik.
-4. Status di bawah galeri menyebut hasil deteksi ("format Polotno terdeteksi, 3
-   halaman"); peringatan konversi (bila ada) ditampilkan di bawahnya.
-
-**Menambah template:** letakkan berkas JSON (format native *atau* Polotno) di
-`src/templates/` atau `src/templates/polotno/`, lalu tambahkan satu entri di
-`src/templates/index.ts`:
-
-```ts
-import promoBaru from "./polotno/promo-baru.polotno.json";
-// ...
-{ id: "promo-baru", name: "Promo baru", description: "Dua halaman", data: promoBaru },
+```
+public/templates/
+├── index.json                       # katalog: id, name, description, file, thumbnail, pages, width, height
+├── <id>.polotno.json                # satu dokumen format Polotno per template (11 berkas)
+└── thumbs/<id>.svg                  # pratinjau halaman pertama
 ```
 
-Setiap elemen sebaiknya punya `id` unik (adapter membuatkan id bila kosong atau kembar).
+| Template | Halaman | Ukuran |
+|---|---|---|
+| Presentasi 3 slide | 3 | 1280×720 |
+| Brosur 2 halaman | 2 | 794×1123 (A4) |
+| Carousel Instagram | 4 | 1080×1080 |
+| Kartu nama | 2 | 1050×600 |
+| Undangan story | 3 | 1080×1920 (gambar bermask lingkaran + garis + bayangan) |
+| Katalog produk | 2 | 1080×1080 (kecerahan, sepia, hitam-putih, kontras+saturasi, blur, sudut membulat, mask) |
+| Paket feed + story | 2 | **1080×1080 dan 1080×1920** dalam satu berkas |
+| Promo diskon | 1 | 900×600 |
+| Post media sosial | 1 | 600×600 |
+| Poster acara | 1 | 900×600 |
+| Kartu kutipan | 1 | 900×600 |
 
----
+Semuanya berformat **Polotno**. Dua template yang dulu native (Poster acara, Kartu kutipan)
+dikonversi sekali dengan `convertKusukaToPolotno()`. Semua template dimuat **tanpa
+peringatan** (diuji).
+
+### Alur di tab Template (`TemplatePanel.tsx`, `lib/templateLibrary.ts`)
+
+1. Saat tab dibuka, `fetchTemplateIndex()` mengunduh `/templates/index.json`.
+   `parseTemplateIndex()` memvalidasi katalog: entri tanpa id/nama, id kembar, atau path
+   yang tidak aman (`..`, `https://`, `/` di depan) dibuang.
+2. Kartu menampilkan `thumbs/<id>.svg` sebagai `<img loading="lazy">`, jumlah halaman,
+   dan deskripsi. JSON template **belum** diunduh pada tahap ini.
+3. Saat kartu diklik, `fetchTemplateDocument()` mengunduh JSON-nya. JSON itu masuk
+   `loadFromJSON()`, lalu `parseDocument()` dan `convertPolotnoToKusuka()`, jalur yang sama
+   dengan berkas Impor. Semua halaman dan elemen dibangun ulang di store sebagai **satu
+   langkah undo**.
+4. Galat HTTP atau jaringan menjadi pesan di panel, misalnya "tidak bisa diunduh
+   (HTTP 404)".
+
+**Menambah template:** taruh berkas Polotno di `public/templates/`, tambahkan entrinya di
+`index.json` (`id`, `name`, `description`, `file`), lalu jalankan:
+
+```bash
+npm run templates:build
+```
+
+Skrip `scripts/build-template-thumbnails.ts` mengonversi setiap berkas dengan adapter
+editor, menggambar halaman pertama dengan komponen `TemplateThumbnail` yang sama
+(`renderToStaticMarkup` → `thumbs/<id>.svg`), lalu mengisi `thumbnail`, `pages`, `width`,
+dan `height` di `index.json`.
+
+### Template saya (simpan & unggah mandiri)
+
+Bagian **Template saya** di atas galeri:
+
+- **Simpan desain ini**: dokumen aktif disimpan sebagai berkas yang sama dengan yang ditulis
+  "Ekspor › JSON Polotno" (gambar unggahan ikut tertanam), dengan nama yang diketik.
+- **Unggah berkas template (.json)**: berkas KusukaEdit atau Polotno divalidasi dengan
+  `parseDocument()`, lalu disimpan dalam format Polotno.
+- Kartu template sendiri menampilkan pratinjau yang digambar dari dokumennya sendiri (tidak
+  ada gambar yang disimpan terpisah), bisa dibuka seperti template galeri, dan dihapus lewat
+  tombol ✕.
+
+Penyimpanannya **localStorage** (`kusukaedit.userTemplates`), bukan Route Handler
+`/api/templates`. Alasannya: di Railway/Render, disk server tidak bertahan antar-*deploy*,
+jadi template yang ditulis server akan hilang, dan berkas itu juga akan terlihat oleh semua
+pengunjung. Konsekuensinya, template hanya ada di browser itu, dengan batas sekitar 5 MB.
+Bila penuh, muncul pesan "Penyimpanan browser penuh", bukan galat diam.
 
 ---
 
@@ -2244,19 +2372,17 @@ Buka `http://localhost:3000`.
 
 ### Cara kerja `Dockerfile` (3 stage)
 
-1. **`deps`** — `npm ci` menginstal dependency sesuai `package-lock.json`. Repositori
-   ini belum menyertakan lockfile (registry npm tidak terjangkau saat pengembangan),
-   jadi `Dockerfile` otomatis memakai `npm install`. Jalankan `npm install` sekali di
-   mesin yang punya akses internet dan commit `package-lock.json` agar build
-   Docker bisa direproduksi.
+1. **`deps`** — `npm ci` menginstal dependency persis sesuai `package-lock.json`
+   (di-commit sejak v11; lihat "Pembaruan keamanan dependensi"). Tanpa lockfile,
+   `Dockerfile` memakai `npm install`.
 2. **`builder`** — `npm run build`. `next.config.js` memakai `output: "standalone"`
    sehingga Next.js hanya menyertakan dependency produksi yang dipakai dan
    menghasilkan `server.js` mandiri.
 3. **`runner`** — image akhir hanya berisi hasil `standalone` + `public` +
    `.next/static`, berjalan sebagai user non-root (`nextjs`).
 
-Template berupa berkas `.json` yang di-*bundle* oleh webpack ke dalam build, jadi
-tidak perlu menyalin folder `src/templates` ke image.
+Template ada di `public/templates/`, yang disalin ke image oleh stage `runner`
+(`COPY --from=builder /app/public ./public`) dan disajikan sebagai berkas statis.
 
 | Variabel | Default | Keterangan |
 |---|---|---|
@@ -2270,6 +2396,36 @@ tidak perlu menyalin folder `src/templates` ke image.
 
 ---
 
+## Pembaruan keamanan dependensi (v11)
+
+- `next` di `package.json`: `14.2.5` → **`^14.2.35`**, rilis terbaru seri 14 (dist-tag
+  `next-14`) per 14 November 2026.
+- **`package-lock.json`** kini di-commit, dibuat di kontainer tanpa Node di mesin sendiri:
+
+  ```bash
+  docker run --rm -v "${PWD}:/app" -w /app node:20-alpine npm install
+  ```
+
+  Lalu `npm audit fix` (tanpa `--force`) menaikkan `source-map-js` (dependensi `postcss`
+  milik Next) ke 1.2.2, yang menutup advisori HIGH GHSA-68fv-2mgg-jv7q. Akibatnya,
+  `Dockerfile` kini memakai `npm ci`.
+- **Divalidasi:**
+  - `docker build .` berhasil: `npm ci` ("added 41 packages") dan `next build`
+    ("Compiled successfully", 4 halaman statis).
+  - Image hasilnya menjawab HTTP 200 untuk `/`, `/templates/index.json`,
+    `/templates/thumbs/*.svg` (`image/svg+xml`), dan berkas template.
+  - Server dev juga sudah berjalan dengan Next 14.2.35.
+- **Yang masih dilaporkan `npm audit --omit=dev`:**
+  - `next` (critical): advisori terbaru di basis data npm berlaku untuk rentang
+    `9.3.4-canary.0 – 16.3.0-preview.10`, jadi **tidak ada versi seri 14 yang bersih**.
+    `npm audit fix --force` akan memasang Next 16, perubahan besar yang belum dicoba.
+  - `postcss` 8.4.31 (high), yang dipatok oleh Next 14 sendiri.
+  - `uuid` 9 (moderate): celahnya hanya pada v3/v5/v6 dengan argumen `buf`; editor ini
+    hanya memakai `v4()`.
+
+  Apakah Railway/Render tetap memblokir build karena laporan ini belum diketahui (lihat
+  "Belum diuji").
+
 ## Catatan pengujian
 
 ### Menjalankan test suite
@@ -2279,7 +2435,7 @@ npm install
 npm test
 ```
 
-`npm test` menjalankan **sepuluh berkas** di `tests/` lewat [`tsx`](https://tsx.is/)
+`npm test` menjalankan **sebelas berkas** di `tests/` lewat [`tsx`](https://tsx.is/)
 (devDependency), **tanpa browser dan tanpa Next.js** — butuh Node 20+ (memakai
 `Blob`, `URL.createObjectURL`, dan `fetch(blob:)` bawaan Node; diuji pada Node 22). Zustand dan uuid
 diganti stub tipis di `tests/stubs/` lewat `tests/tsconfig.json`, dengan kontrak
@@ -2289,9 +2445,9 @@ diganti stub tipis di `tests/stubs/` lewat `tests/tsconfig.json`, dengan kontrak
 
 | Berkas | Isi | Jumlah |
 |---|---|---|
-| `tests/core.test.ts` | warna, font, deteksi format (native v1/v2/v3 vs Polotno), adapter dua arah, **migrasi v1 → v2 → v3** (v2 menjadi satu halaman tanpa peringatan, v3 dibaca sebagai v5, versi 6 ditolak), `parseDocument`, store (history, clipboard, JSON, `editingId`) | 22 |
+| `tests/core.test.ts` | warna, font, deteksi format (native v1/v2/v3 vs Polotno), adapter dua arah, **migrasi v1 → v2 → v3** (v2 menjadi satu halaman tanpa peringatan, v3 dibaca sebagai v6, versi 7 ditolak), `parseDocument`, store (history, clipboard, JSON, `editingId`) | 22 |
 | `tests/media-workspace.test.ts` | aturan ukuran kanvas & rencana export, pencatat URL objek, `addImageElement`/`replaceImageSource`, **revoke berbasis referensi** (hapus, ganti, Undo, pemangkasan history, clipboard — kini menelusuri semua halaman), gestur gambar = satu langkah undo, `setCanvasMeta`, penyematan `blob:` → `data:` saat export (semua halaman), adapter (struktur bertingkat, `pageIndex`, **tanpa `pageIndex` setiap halaman diimpor dengan ukurannya sendiri**, `color`/`fill`, titik jangkar, crop, gambar, grup) | 28 |
-| `tests/templates.test.ts` | registry (id unik, 7 template Polotno ada), **tiap template**: termuat **tanpa peringatan**, warna `#rrggbb`, id/zIndex unik per halaman dan id unik di seluruh dokumen, native ↔ Polotno tanpa kehilangan data; jumlah halaman dan ukuran per halaman tiap berkas Polotno; efek gambar Katalog produk; contoh satu dan tiga halaman | 28 |
+| `tests/templates.test.ts` | katalog `public/templates/index.json` (id unik, 7 template multi-halaman ada, tak ada entri terbuang, **semua berkas berformat Polotno**, thumbnail ada, `pages` sesuai berkas), **tiap template**: termuat **tanpa peringatan**, warna `#rrggbb`, id/zIndex unik per halaman dan id unik di seluruh dokumen, native ↔ Polotno tanpa kehilangan data; jumlah halaman dan ukuran per halaman tiap berkas Polotno; efek gambar Katalog produk; contoh satu dan tiga halaman | 28 |
 | `tests/image-tools.test.ts` | **crop** (pecahan → piksel asli; tepi/sudut; batas gambar dan ukuran minimal; gambar dirotasi dan dicerminkan; geser; reset; *property test* 400 putaran: skala gambar tetap dan piksel yang terlihat tetap di tempatnya), **drop** (hanya seretan berkas, `files[0]`, kursor → koordinat desain pada berbagai zoom, drop di luar kanvas), store (`addImageElement` dengan `at`, `setImageCrop` = satu langkah undo, `resetImageCrop`, `croppingId` mengikuti pilihan), **efek** (hanya efek yang terlihat yang aktif, konfigurasi blur/cache, urutan `cache → filters → blurRadius`), `drawPicture` dengan mask/garis/bayangan (urutan panggilan konteks), deteksi mask, `colorAlpha`, adapter (blur, border, shadow, SVG, mask dikenali/tidak dikenali, peringatan yang tersisa, pulang-pergi), validasi file native, dan contoh `sample-effects.polotno.json` tanpa peringatan | 41 |
 | `tests/vector-text-view.test.ts` | `cleanPolotnoText` (paragraf, `<br>`, baris kosong, entitas, teks polos dengan `<`/`>`, atribut berisi `>`), teks HTML lewat adapter + peringatan, SVG (impor, ekspor `svg`, `colorsReplace` data URI/base64/tautan), flip dan skala negatif (*property test* 36 kombinasi rotasi × skala), toleransi lebar teks (per `align`, rotasi, bolak-balik tanpa membengkak), `fitZoom`/`stepZoom`/`scaledSize`, `loadRevision`, export bebas zoom dengan Stage palsu (termasuk gagal dan batas 8192 px), `drawPicture` | 35 |
 | `tests/pages.test.ts` | **halaman**: `createBlankPage`, `duplicatePageData` (id baru untuk halaman dan semua elemen), indeks (jepit, validasi, setelah hapus), selectors; store — satu halaman awal, `addPage` (setelah halaman aktif, ukuran diwariskan), `duplicatePage` (id baru, indeks buruk tidak mencatat history), `deletePage` (halaman terakhir dilindungi, undo), **`goToPage` menyetel ulang seleksi/edit/crop**, aksi elemen hanya menyentuh halaman aktif, clipboard lintas halaman, **gestur di halaman 2 tetap satu langkah undo dan Undo membawa kembali ke halaman 2**, `setCanvasMeta` (`allPages`), export/load JSON semua halaman (native dan Polotno), berkas buruk tidak mengubah apa pun; adapter — dokumen banyak halaman pulang-pergi, ukuran halaman `"auto"` vs angka, urutan tumpukan per halaman, **seluruh halaman diimpor**, id unik antarhalaman, `pages` kosong, latar gambar, deteksi v3, migrasi v1/v2 → v3, versi lebih baru ditolak, idempotensi v3 | 37 |
@@ -2300,7 +2456,9 @@ diganti stub tipis di `tests/stubs/` lewat `tests/tsconfig.json`, dengan kontrak
 | `tests/v5-effects-text.test.ts` | **v10**: `sanitizeDash`, satuan dash Polotno (`min(strokeWidth, w/2, h/2)`, dua arah), `resolveTextBackground` (pecahan setengah baris, bawaan Polotno, mati/tidak terlihat), kotak latar per baris (center/right/justify, baris kosong), `curveLayout` (panjang busur + kelonggaran, ke atas/bawah, simetris, tidak pernah lingkaran penuh), **impor Polotno semua efek dengan `warnings: []`**, **ekspor dengan nama Polotno + pulang-pergi identik**, dash teks/gambar di `custom`, yang masih dilaporkan (overline), validasi berkas native v5, **store**: dash/blur/filter lewat `setElementStyle` = satu langkah undo, Undo/Redo latar & lengkung, ekspor JSON native/Polotno memuatnya; pemuat font (nama keluarga, font sistem, URL Google Fonts, Node → `false`) | 13 |
 | `tests/filters-export.test.ts` | **filter**: matriks identitas, kecerahan/kontras/saturasi angka demi angka, preset lebih dulu lalu slider, `multiplyMatrices`, `filterKey` dan batas ukuran salinan; `cornerRadius` dan filter di `resolveImageEffects`; `applyImageStylePatch` (jepit, bulatkan, abaikan nilai buruk, objek sama = tanpa langkah undo, `undefined` menghapus); `setImageStyle` (satu geseran = satu langkah undo, hanya gambar di halaman aktif); `drawPicture` dengan sudut membulat (urutan klip, jari-jari dijepit, bayangan di luar bentuk, area klik); **Polotno** (`brightness`, `filters.contrast/saturation`, hitam-putih/sepia, filter tak dikenal dilaporkan sekali, preset di `custom`, `cornerRadius` di bawah mask tetap ditulis, pulang-pergi); validasi file native; **ZIP** (`crc32` nilai standar, `dataUrlToBytes`, struktur arsip, arsip kosong, cap waktu DOS); **batch** (urutan render, progres, halaman awal dipulihkan, galat dilempar setelah dipulihkan, nama berkas bernomor, `waitUntil`) | 33 |
 
-Total **266 tes** (22 + 28 + 28 + 41 + 35 + 37 + 33 + 23 + 6 + 13); semuanya lulus pada saat README
+| `tests/v6-library-lossless.test.ts` | **v11**: `parseTemplateIndex` (entri rusak/kembar/path tidak aman dibuang), `fetchTemplateIndex`/`fetchTemplateDocument` dengan fetch palsu (sukses, 404, jaringan putus), Template saya dengan storage palsu (urutan terbaru, hapus, data rusak, thumbnail berbahaya dibuang, kuota penuh, tanpa storage); **preset efek teks** (8 preset dikenali kembali, ganti preset tanpa sisa, ukuran ikut font, pendar = warna teks, garis tepi kontras, Latar tetap Latar saat diatur), preset = satu langkah undo; `resolveTextBorder`; **pulang-pergi Polotno identik** (`deepEqual` dengan berkas asli), suntingan menang atas salinan, lewat berkas native, berkas buatan editor tidak menyimpan apa-apa, lewat store (`documentPolotno`, direset oleh Desain baru) | 11 |
+
+Total **277 tes** (22 + 28 + 28 + 41 + 35 + 37 + 33 + 23 + 6 + 13 + 11); semuanya lulus pada saat README
 ini ditulis (Node 24 di container `node:24-slim`, karena mesin pengembangan v8 tidak punya
 Node terpasang). `npx tsc --noEmit` juga bersih.
 
@@ -2310,6 +2468,31 @@ folder `node_modules/` di proyek tidak disentuh):
 ```bash
 docker run --rm -v "$PWD:/app" -v kusuka_nm:/app/node_modules -w /app node:24-slim sh -c "npm install && npm test && npx tsc --noEmit"
 ```
+
+### Diuji di browser dengan Konva asli (v11)
+
+`next dev` **Next 14.2.35** di container `node:20-alpine` (port 3001), Chromium:
+
+- **Tab Template**: katalog dan 11 kartu dengan thumbnail SVG tampil. Klik "Presentasi 3
+  slide" → hanya saat itu `presentasi-3-slide.polotno.json` diunduh → "Halaman 1 / 3".
+- **Template saya**:
+  - Nama diketik → **Simpan desain ini** → kartu "Presentasi saya · 3 hal. · Milik saya"
+    (17 KB di localStorage, 3 halaman Polotno).
+  - **Desain baru** ("Halaman 1 / 1") → kartu itu diklik → "Halaman 1 / 3".
+  - Berkas Polotno diunggah → kartu "kartu-unggahan" muncul; ✕ menghapusnya dan
+    localStorage ikut diperbarui.
+- **Toolbar**:
+  - Kelompok font · gaya · perataan · paragraf · efek dengan pemisah halus.
+  - Teks dibuat lengkung → tombol perataan, daftar, dan auto-fit hilang, dan kelompok
+    kosongnya tersembunyi.
+  - Di 420 px baris kontrol bergulir sendiri, sedangkan **Hapus** (339–401 px) tetap di
+    `.toolbar__end` tanpa tumpang-tindih, tanpa scroll horizontal halaman.
+- **Preset efek**: Pop (bayangan merah muda tegas), Stiker (garis putih tebal), Latar (kotak
+  gelap di belakang teks putih) + **Garis tepi kotak** 2 px digambar di kanvas; kartu Latar
+  tetap aktif setelah garis tepi dinyalakan.
+- **Build produksi**: `docker build .` (`npm ci` + `next build`) berhasil; image menjawab
+  HTTP 200 untuk halaman, `index.json`, thumbnail SVG, dan berkas template.
+- Tidak ada galat di konsol browser maupun log server.
 
 ### Diuji di browser dengan Konva asli (v10)
 
@@ -2495,6 +2678,23 @@ dibaca dari halaman aktif.
 
 ### Belum diuji
 
+- **v11:**
+  1. Build otomatis di **Railway/Render belum dilihat**. Yang diuji hanya `docker build`
+     lokal dengan `Dockerfile` yang sama. `npm audit` masih melaporkan `next` 14 (lihat
+     "Pembaruan keamanan dependensi").
+  2. Hasil ekspor **belum dibuka di aplikasi Polotno sungguhan**. "Identik" di sini berarti
+     JSON-nya `deepEqual` dengan berkas aslinya. Tampilan teks lengkung dan garis tepi kotak
+     latar di Polotno belum dibandingkan; letak garis tepi kotak ditebak dari kode Polotno
+     yang terbaca sebagian.
+  3. Preset efek adalah rancangan sendiri (meniru gaya Canva/Polotno), bukan nilai yang
+     disalin dari Polotno.
+  4. Template saya hanya tersimpan di browser itu; tidak ada sinkronisasi antar-perangkat.
+     Batas sekitar 5 MB belum dicoba dengan desain berisi banyak foto besar (pesan "penuh"
+     hanya diuji dengan storage palsu).
+  5. Thumbnail SVG memakai `<foreignObject>` untuk teks; dilihat di Chromium. Safari dikenal
+     kurang baik menggambar `<foreignObject>` di dalam `<img>`.
+  6. Kotak latar teks **lengkung** adalah satu kotak di sekeliling busur, sehingga untuk busur
+     besar terlihat lebar.
 - **Fitur v10 yang belum diperiksa:**
   1. Berkas hasil ekspor **belum dibuka di Polotno sungguhan**. Nama properti dan satuan latar
      teks serta dash bentuk dicocokkan dengan kode kanvas Polotno, dan pulang-pergi di editor ini

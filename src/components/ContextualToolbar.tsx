@@ -32,6 +32,7 @@ import {
 } from "@/lib/textEffects";
 import { FONT_CHOICES } from "@/lib/fontLoader";
 import DashPicker from "@/components/DashPicker";
+import TextEffectPresets from "@/components/TextEffectPresets";
 import { PRESET_LABEL } from "@/components/ImageStylePanel";
 import type { FilterPreset } from "@/types/editor";
 
@@ -65,10 +66,6 @@ const DEFAULT_SHADOW: ElementStylePatch = {
 };
 
 // ------------------------------- building blocks ------------------------------
-
-function Divider() {
-  return <span className="toolbar__divider" aria-hidden="true" />;
-}
 
 function ToolButton({
   active,
@@ -145,7 +142,8 @@ function Popover({
     // button at the toolbar's edge scrolls it into view, so closing on every
     // scroll would close the panel the user just opened; it closes only when
     // the button has left the toolbar's visible part.
-    const toolbar = rootRef.current?.closest(".toolbar");
+    // the row of controls is what scrolls sideways (the end section does not)
+    const toolbar = rootRef.current?.closest(".toolbar__row") ?? rootRef.current?.closest(".toolbar");
     const onScroll = () => {
       const button = buttonRef.current?.getBoundingClientRect();
       const bar = toolbar?.getBoundingClientRect();
@@ -310,15 +308,22 @@ function EffectsPopover({ el }: { el: TextElement | ShapeElement }) {
   const filterOn = (el.blurRadius ?? 0) > 0 || FILTER_KEYS.some((k) => el[k as keyof typeof el] !== undefined);
   const backgroundOn = el.type === "text" && el.backgroundEnabled === true;
   const curveOn = el.type === "text" && el.curveEnabled === true;
-  const anyOn = opacity < 100 || shadowOn || outlineOn || filterOn || backgroundOn || curveOn || !!el.dash;
+  const boxBorderOn = el.type === "text" && (el.borderSize ?? 0) > 0;
+  const anyOn = opacity < 100 || shadowOn || outlineOn || filterOn || backgroundOn || curveOn || boxBorderOn || !!el.dash;
 
   return (
     <Popover
       label="✦ Efek"
-      title="Efek: transparansi, bayangan, garis tepi dan pola garis, blur dan filter warna, latar teks, teks lengkung"
+      title={
+        el.type === "text"
+          ? "Efek teks: gaya siap pakai, latar teks, teks lengkung, bayangan, garis tepi, blur dan filter"
+          : "Efek: transparansi, bayangan, garis tepi dan pola garis, blur dan filter warna"
+      }
       action="effects"
       active={anyOn}
     >
+      {el.type === "text" && <TextEffectPresets el={el} />}
+
       <div className="popover__section">
         <Slider
           label="Transparansi"
@@ -433,7 +438,7 @@ function EffectsPopover({ el }: { el: TextElement | ShapeElement }) {
             min={0}
             max={100}
             unit="%"
-            disabled={!backgroundOn}
+            disabled={!backgroundOn && !boxBorderOn}
             onChange={(v) => update({ backgroundCornerRadius: v / 100 })}
           />
           <Slider
@@ -443,8 +448,40 @@ function EffectsPopover({ el }: { el: TextElement | ShapeElement }) {
             min={0}
             max={200}
             unit="%"
-            disabled={!backgroundOn}
+            disabled={!backgroundOn && !boxBorderOn}
             onChange={(v) => update({ backgroundPadding: v / 100 })}
+          />
+          <label className="check check--sub">
+            <input
+              type="checkbox"
+              checked={boxBorderOn}
+              data-style-control="box-border-toggle"
+              onChange={(e) =>
+                update(
+                  e.target.checked
+                    ? { borderSize: 2, borderColor: el.borderColor ?? "#000000" }
+                    : { borderSize: undefined, borderColor: undefined }
+                )
+              }
+            />
+            <span>Garis tepi kotak</span>
+            <input
+              type="color"
+              aria-label="Warna garis tepi kotak"
+              disabled={!boxBorderOn}
+              value={toInputColor(el.borderColor ?? "#000000")}
+              onChange={(e) => update({ borderColor: e.target.value })}
+            />
+          </label>
+          <Slider
+            label="Tebal garis"
+            name="borderSize"
+            value={el.borderSize ?? 0}
+            min={1}
+            max={20}
+            unit=" px"
+            disabled={!boxBorderOn}
+            onChange={(v) => update({ borderSize: v })}
           />
         </div>
       )}
@@ -598,9 +635,13 @@ function TextControls({ el }: { el: TextElement }) {
   const alignIndex = Math.max(0, ALIGN_OPTIONS.findIndex((a) => a.value === el.align));
   const alignOption = ALIGN_OPTIONS[alignIndex];
   const nextAlign = ALIGN_OPTIONS[(alignIndex + 1) % ALIGN_OPTIONS.length];
+  // A curved text is one centred line on an arc: alignment, lists and
+  // auto-fit do nothing there, so their buttons are not shown.
+  const curved = el.curveEnabled === true;
 
   return (
     <>
+      <span className="tbar-group" data-group="font">
       <input
         type="color"
         className="toolbar__swatch"
@@ -632,15 +673,16 @@ function TextControls({ el }: { el: TextElement }) {
         max={500}
         onChange={(v) => update({ fontSize: v })}
       />
-      <ToolButton
+      {!curved && <ToolButton
         active={el.autoFit === true}
         title="Kecilkan otomatis: ukuran huruf mengecil sendiri bila teks tidak muat di kotaknya (tinggi kotak bisa diatur)"
         action="auto-fit"
         onClick={() => update({ autoFit: el.autoFit ? undefined : true })}
       >
         ⤡
-      </ToolButton>
-      <Divider />
+      </ToolButton>}
+      </span>
+      <span className="tbar-group" data-group="style">
       <ToolButton active={bold} title="Tebal (Bold)" action="bold" onClick={() => update({ fontStyle: withStyle(el.fontStyle, "bold", !bold) })}>
         <b>B</b>
       </ToolButton>
@@ -663,9 +705,10 @@ function TextControls({ el }: { el: TextElement }) {
       >
         <s>S</s>
       </ToolButton>
-      <Divider />
+      </span>
+      <span className="tbar-group" data-group="align">
       {/* One button, like Polotno's: each click goes to the next alignment. */}
-      <ToolButton
+      {!curved && <ToolButton
         title={`${alignOption.label} — klik untuk ${nextAlign.label.toLowerCase()}`}
         action="align"
         onClick={() => update({ align: nextAlign.value })}
@@ -675,8 +718,10 @@ function TextControls({ el }: { el: TextElement }) {
           <i />
           <i />
         </span>
-      </ToolButton>
-      <Divider />
+      </ToolButton>}
+      </span>
+      <span className="tbar-group" data-group="paragraph">
+      {!curved && (<>
       <ToolButton
         active={el.listType === "bullet"}
         title="Daftar berpoin"
@@ -693,6 +738,7 @@ function TextControls({ el }: { el: TextElement }) {
       >
         1≡
       </ToolButton>
+      </>)}
       <Popover
         label="↕"
         compact
@@ -738,8 +784,10 @@ function TextControls({ el }: { el: TextElement }) {
       >
         aa
       </ToolButton>
-      <Divider />
+      </span>
+      <span className="tbar-group" data-group="effects">
       <EffectsPopover el={el} />
+      </span>
     </>
   );
 }
@@ -751,6 +799,7 @@ function ShapeControls({ el }: { el: ShapeElement }) {
   const setElementStyle = useEditorStore((s) => s.setElementStyle);
   return (
     <>
+      <span className="tbar-group" data-group="fill">
       <label className="toolbar__field" title="Warna isi">
         <span>Isi</span>
         <input
@@ -762,7 +811,8 @@ function ShapeControls({ el }: { el: ShapeElement }) {
           data-toolbar-action="fill-color"
         />
       </label>
-      <Divider />
+      </span>
+      <span className="tbar-group" data-group="stroke">
       <label className="toolbar__field" title="Warna garis tepi">
         <span>Garis</span>
         <input
@@ -782,9 +832,9 @@ function ShapeControls({ el }: { el: ShapeElement }) {
         max={MAX_STROKE_WIDTH}
         onChange={(v) => setElementStyle(el.id, { strokeWidth: v })}
       />
+      </span>
       {el.shapeType === "rect" && (
-        <>
-          <Divider />
+        <span className="tbar-group" data-group="corner">
           <label className="toolbar__field" title="Sudut membulat">
             <span>Sudut</span>
             <Stepper
@@ -796,10 +846,11 @@ function ShapeControls({ el }: { el: ShapeElement }) {
               onChange={(v) => updateElement(el.id, { cornerRadius: v })}
             />
           </label>
-        </>
+        </span>
       )}
-      <Divider />
+      <span className="tbar-group" data-group="effects">
       <EffectsPopover el={el} />
+      </span>
     </>
   );
 }
@@ -850,6 +901,7 @@ function ImageControls({ el, stylePanelOpen, onToggleStylePanel }: { el: ImageEl
   const mask = el.maskShape ?? null;
   return (
     <>
+      <span className="tbar-group" data-group="crop">
       <ToolButton
         active={cropping}
         title="Pangkas gambar: seret siku atau tepi bingkai (atau klik dua kali gambarnya)"
@@ -859,16 +911,13 @@ function ImageControls({ el, stylePanelOpen, onToggleStylePanel }: { el: ImageEl
       >
         {cropping ? "✓ Selesai" : "⧉ Pangkas"}
       </ToolButton>
-      <ToolButton
-        title="Tampilkan lagi seluruh gambar"
-        action="reset-crop"
-        wide
-        disabled={isWholePicture(el)}
-        onClick={() => resetImageCrop(el.id)}
-      >
-        Reset
-      </ToolButton>
-      <Divider />
+      {!isWholePicture(el) && (
+        <ToolButton title="Tampilkan lagi seluruh gambar" action="reset-crop" wide onClick={() => resetImageCrop(el.id)}>
+          Reset
+        </ToolButton>
+      )}
+      </span>
+      <span className="tbar-group" data-group="look">
       <Popover label="⇋ Balik" title="Cerminkan gambar" action="flip" active={el.scaleX === -1 || el.scaleY === -1}>
         <div className="popover__list">
           <button type="button" className={el.scaleX === -1 ? "active" : ""} onClick={() => flipImage(el.id, "x")} data-toolbar-action="flip-x">
@@ -912,7 +961,8 @@ function ImageControls({ el, stylePanelOpen, onToggleStylePanel }: { el: ImageEl
           ))}
         </div>
       </Popover>
-      <Divider />
+      </span>
+      <span className="tbar-group" data-group="replace">
       <ToolButton
         title="Ganti isi gambar; posisi dan lebar tetap, tinggi mengikuti rasio gambar baru"
         action="replace"
@@ -928,6 +978,7 @@ function ImageControls({ el, stylePanelOpen, onToggleStylePanel }: { el: ImageEl
       </ToolButton>
       <input ref={replaceInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleReplaceFile} />
       {replaceError && <span className="error-note error-note--inline">{replaceError}</span>}
+      </span>
     </>
   );
 }

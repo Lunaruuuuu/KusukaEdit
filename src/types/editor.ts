@@ -34,10 +34,15 @@ export type TextListType = "bullet" | "number";
  *       a dash pattern for borders (`dash`), and two text effects: a background
  *       box behind the text (background*) and curved text (curve*). All new
  *       fields are optional again: a v4 file is a valid v5 file.
+ *   v6: a border around a text's background box (borderColor / borderSize,
+ *       Polotno's names), and `polotno`: the Polotno properties of an imported
+ *       element / page / document that this editor does not use, kept as they
+ *       were so an export gives them back (lossless round trip). Optional
+ *       again: a v5 file is a valid v6 file.
  * Files with an older `version` are migrated automatically on load (a v1/v2
  * file becomes a one-page document).
  */
-export const SCHEMA_VERSION = 5 as const;
+export const SCHEMA_VERSION = 6 as const;
 
 /** The last schema in which a document was ONE canvas (`canvas` + `elements`). */
 export const LAST_SINGLE_PAGE_SCHEMA = 2 as const;
@@ -95,6 +100,14 @@ interface BaseElement {
    * has a border (a shape's stroke, a text outline, a picture's border).
    */
   dash?: number[];
+
+  /**
+   * Polotno properties of an imported element that this editor does not use
+   * (name, locks, verticalAlign, animations, blendMode, its own `custom` keys
+   * ...), kept untouched and written back on export, so a Polotno file comes
+   * back from a round trip as it was. Absent for elements made here.
+   */
+  polotno?: Record<string, unknown>;
 }
 
 export interface TextElement extends BaseElement {
@@ -148,6 +161,13 @@ export interface TextElement extends BaseElement {
    */
   backgroundCornerRadius?: number;
   backgroundPadding?: number;
+  /**
+   * Border of the background box (Polotno: borderColor / borderSize). Drawn
+   * along the background boxes, or around the text box when the background
+   * is off. Absent / 0 = none.
+   */
+  borderColor?: string;
+  borderSize?: number;
 
   // ---- Curved text (Polotno: curveEnabled + curvePower) ---------------------
   /** The text is drawn on one circular arc. Absent = straight. */
@@ -250,6 +270,8 @@ export interface Page {
   id: string;
   canvas: CanvasMeta;
   elements: CanvasElement[];
+  /** Unused Polotno page properties (bleed, duration, custom ...), written back on export. */
+  polotno?: Record<string, unknown>;
 }
 
 // The full exported document. `version` lets loadFromJSON migrate or reject
@@ -258,4 +280,6 @@ export interface Page {
 export interface CanvasDocument {
   version: typeof SCHEMA_VERSION;
   pages: Page[];
+  /** Unused Polotno document properties (schemaVersion, fonts, audios, unit, dpi, custom ...). */
+  polotno?: Record<string, unknown>;
 }

@@ -33,6 +33,8 @@ export type TextOptionFields = Pick<
   | "backgroundOpacity"
   | "backgroundCornerRadius"
   | "backgroundPadding"
+  | "borderColor"
+  | "borderSize"
   | "curveEnabled"
   | "curvePower"
 >;
@@ -136,6 +138,15 @@ export function readTextOptions(raw: Rec, source: "native" | "polotno", color: (
       if (raw.backgroundPadding !== undefined) {
         fields.backgroundPadding = round4(clamp(num(raw.backgroundPadding, 0.5), 0, MAX_BACKGROUND_FRACTION));
       }
+    }
+  }
+  // Border of the background box (Polotno: borderColor default black, borderSize 0).
+  const borderSize = num(raw.borderSize, 0);
+  if (borderSize > 0) {
+    const border = color(raw.borderColor === undefined ? "#000000" : raw.borderColor);
+    if (border !== null && border !== "transparent") {
+      fields.borderColor = border;
+      fields.borderSize = round4(clamp(borderSize, 0, MAX_STROKE_WIDTH));
     }
   }
   if (raw.curveEnabled === true) {

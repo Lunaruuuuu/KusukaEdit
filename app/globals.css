@@ -1917,3 +1917,183 @@ input:focus-visible {
   border: 1px solid var(--border);
   border-radius: 6px;
 }
+
+/* ======================================================================
+   v11: tidy contextual toolbar, text effect presets, template library
+   ====================================================================== */
+/* One row: the controls scroll sideways inside .toolbar__row, the stacking
+   menu and Delete (.toolbar__end) stay pinned at the right and never overlap. */
+.toolbar {
+  overflow: hidden;
+  gap: 0;
+  padding: 8px 10px 8px 6px;
+}
+.toolbar__row {
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.toolbar__end {
+  flex: none;
+  gap: 6px;
+  margin-left: 0;
+  padding-left: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+/* A category of controls; a fine line separates two categories. */
+.tbar-group {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+}
+.tbar-group + .tbar-group {
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+.tbar-group:empty {
+  display: none;
+}
+/* Every control is 30 px high, so the row lines up. */
+.toolbar .tool-button,
+.toolbar .stepper,
+.toolbar .toolbar__font,
+.toolbar input.toolbar__swatch {
+  height: 30px;
+  box-sizing: border-box;
+}
+.toolbar .toolbar__field {
+  gap: 5px;
+}
+.toolbar__count {
+  padding: 0 8px;
+}
+
+/* Text effect presets */
+.effect-presets {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.effect-preset {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 2px;
+  color: var(--text-primary);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.effect-preset:hover {
+  border-color: var(--accent);
+}
+.effect-preset--on {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.effect-preset__sample {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: #e5e7eb;
+}
+.effect-preset__label {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.check--sub {
+  margin-top: 4px;
+}
+
+/* Template library */
+.template-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.template-section + .template-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.template-section__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.template-save {
+  display: flex;
+  gap: 6px;
+}
+.template-save input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.template-save button,
+.template-upload {
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.template-save button:not(:disabled):hover,
+.template-upload:hover {
+  border-color: var(--accent);
+}
+.template-card__sheet img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.template-card--user {
+  position: relative;
+  padding: 0;
+}
+.template-card__open {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 6px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.template-card__remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.template-card__remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}

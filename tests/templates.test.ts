@@ -6,17 +6,27 @@ import {
   detectFormat,
   parseDocument,
 } from "@/lib/polotnoAdapter";
-import { TEMPLATES } from "@/templates";
+import { readFileSync, existsSync } from "node:fs";
+import { parseTemplateIndex } from "@/lib/templateLibrary";
 import sample from "../examples/sample-design.json";
 import samplePolotno from "../examples/sample-design.polotno.json";
 import multipage from "../examples/sample-multipage.json";
 import multipagePolotno from "../examples/sample-multipage.polotno.json";
 import type { CanvasDocument } from "@/types/editor";
 
+// v11: the templates are served from public/templates (catalogue: index.json).
+const TEMPLATE_DIR = "public/templates";
+const catalogue = parseTemplateIndex(JSON.parse(readFileSync(`${TEMPLATE_DIR}/index.json`, "utf8")));
+if ("error" in catalogue) throw new Error(catalogue.error);
+const TEMPLATES = catalogue.index.templates.map((entry) => ({
+  ...entry,
+  data: JSON.parse(readFileSync(`${TEMPLATE_DIR}/${entry.file}`, "utf8")) as unknown,
+}));
+
 const HEX = /^#[0-9a-f]{6}$/;
 const isColor = (c: string) => HEX.test(c) || c === "transparent";
 
-/** Templates written in Polotno's own format (src/templates/polotno/*.polotno.json). */
+/** The multi-page Polotno templates (public/templates/*.polotno.json). */
 const POLOTNO_IDS = [
   "presentasi-3-slide",
   "brosur-2-halaman",
@@ -42,6 +52,14 @@ test("template registry: unique ids, every entry has a name, the Polotno collect
   for (const t of TEMPLATES) assert.ok(t.name.trim() !== "", t.id);
   for (const id of POLOTNO_IDS) assert.ok(ids.includes(id), `missing template ${id}`);
   assert.equal(TEMPLATES.length, 11);
+  assert.equal(catalogue.skipped, 0);
+  for (const t of TEMPLATES) {
+    // every file of the catalogue is a Polotno document, with a preview next to it
+    assert.equal(detectFormat(t.data), "polotno", t.id);
+    assert.ok(t.thumbnail && existsSync(`${TEMPLATE_DIR}/${t.thumbnail}`), `${t.id}: thumbnail`);
+    const raw = t.data as { pages: unknown[] };
+    assert.equal(t.pages, raw.pages.length, `${t.id}: pages in index.json`);
+  }
 });
 
 for (const tpl of TEMPLATES) {
@@ -52,7 +70,7 @@ for (const tpl of TEMPLATES) {
     // a bundled template must open clean: nothing it uses may be unsupported
     assert.deepEqual(parsed.warnings, [], `${tpl.id} opens with warnings`);
     const doc = parsed.document;
-    assert.equal(doc.version, 5);
+    assert.equal(doc.version, 6);
     assert.ok(doc.pages.length >= 1);
     const allIds: string[] = [];
     for (const page of doc.pages) {

@@ -10,10 +10,9 @@
         "-e", "WATCHPACK_POLLING=true",
         "-e", "NEXT_TELEMETRY_DISABLED=1",
         "-v", "C:/Users/Ryu Nakata/Documents/Kulyeah/Magang/canvas-editor:/app",
-        "-v", "kusuka_nm:/app/node_modules",
         "-v", "kusuka_next:/app/.next",
         "-w", "/app",
-        "node:24-slim",
+        "node:20-alpine",
         "npx", "next", "dev", "-H", "0.0.0.0", "-p", "3000"
       ],
       "port": 3001

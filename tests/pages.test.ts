@@ -430,7 +430,7 @@ test("store: exportToJSON writes ALL pages (native v3) and loadFromJSON reads th
   assert.deepEqual(warnings, []);
   const file = JSON.parse(json) as CanvasDocument;
   assert.equal(file.version, SCHEMA_VERSION);
-  assert.equal(file.version, 5);
+  assert.equal(file.version, 6);
   assert.equal(file.pages.length, 3);
   assert.deepEqual(file.pages.map((p) => p.canvas.width), [900, 640, 300]);
   assert.ok(!("elements" in file) && !("canvas" in file), "no second copy of page 1 at the top level");
@@ -545,7 +545,7 @@ test("adapter: every page of a Polotno file is imported — the 'first page only
     ],
   };
   const r = convertPolotnoToKusuka(doc);
-  assert.equal(r.document.version, 5);
+  assert.equal(r.document.version, 6);
   assert.deepEqual(r.document.pages.map((p) => p.id), ["one", "two", "three"]);
   assert.deepEqual(r.document.pages.map((p) => p.elements.length), [2, 1, 0]);
   assert.deepEqual(r.document.pages.map((p) => [p.canvas.width, p.canvas.height, p.canvas.backgroundColor]), [
@@ -615,7 +615,7 @@ test("adapter: native v1 and v2 files open as one page; v3 pages are read in ord
   });
   assert.ok(!("error" in v2));
   if (!("error" in v2)) {
-    assert.equal(v2.document.version, 5);
+    assert.equal(v2.document.version, 6);
     assert.equal(v2.document.pages.length, 1);
     assert.deepEqual(v2.warnings, []);
     assert.ok(v2.document.pages[0].id.length > 0);
@@ -663,7 +663,7 @@ test("adapter: a file from a newer version is refused with a clear message", () 
   assert.match(r.ok ? "" : r.error, new RegExp(`v${SCHEMA_VERSION + 1}`));
 });
 
-test("adapter: a native v3 document is idempotent (parse -> write -> parse), silently read as v5", () => {
+test("adapter: a native v3 document is idempotent (parse -> write -> parse), silently read as v6", () => {
   const doc = { version: 3, pages: threePages() };
   const a = parseDocument(JSON.parse(JSON.stringify(doc)));
   assert.ok(a.ok);

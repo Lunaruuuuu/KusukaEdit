@@ -28,6 +28,7 @@ import {
   fitRadius,
   isCurved,
   resolveTextBackground,
+  resolveTextBorder,
   sanitizeDash,
   type Box,
   type CurveLayout,
@@ -129,6 +130,13 @@ function measureLine(el: TextElement, text: string, fontSize: number): number {
   return node.measureSize(text).width + spacing * Array.from(text).length;
 }
 
+/** A #rrggbb colour with an opacity, as rgba(); anything else is returned as it is. */
+function withAlpha(color: string, alpha: number): string {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
+  if (!m || alpha >= 1) return color;
+  return `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${alpha})`;
+}
+
 /** Adds a rounded rectangle to the current path (a plain one when the radius is 0). */
 function roundRectPath(ctx: Konva.Context, box: Box, radius: number): void {
   const r = fitRadius(radius, box);
@@ -188,6 +196,11 @@ function TextNode({
   }, [curved, shown, fittedSize, el.curvePower, el.width, el.fontFamily, el.fontStyle, el.letterSpacing, fontsVersion]);
 
   const background = resolveTextBackground(el, fittedSize, el.lineHeight);
+  const border = resolveTextBorder(el);
+  // Padding / corners of the box, also used by a border without a background.
+  const halfLine = fittedSize * el.lineHeight * 0.5;
+  const boxPadding = background?.padding ?? (el.backgroundPadding ?? 0.5) * halfLine;
+  const boxRadius = background?.cornerRadius ?? (el.backgroundCornerRadius ?? 0.5) * halfLine;
   const shadow = resolveShadow(el);
   const dash = sanitizeDash(el.dash);
   const strokeOn = !!el.stroke && (el.strokeWidth ?? 0) > 0;
@@ -235,12 +248,18 @@ function TextNode({
   // The boxes behind the text: one per laid-out line, read from the Text node
   // at draw time (Konva has just laid it out), or one around the arc.
   const backgroundBoxes = (): Box[] => {
-    if (!background) return [];
+    if (!background && !border) return [];
+    const p = boxPadding;
     if (curve) {
       const left = (el.width - curve.span) / 2;
-      return [{ x: left - background.padding, y: -background.padding, width: curve.span + 2 * background.padding, height: curve.height + 2 * background.padding }];
+      return [{ x: left - p, y: -p, width: curve.span + 2 * p, height: curve.height + 2 * p }];
     }
-    const node = textRef.current as unknown as { textArr?: Array<{ width: number }> } | null;
+    const node = textRef.current as unknown as { textArr?: Array<{ width: number }>; height(): number } | null;
+    if (!background) {
+      // a border alone frames the whole text box
+      const h = el.autoFit ? el.height : (node?.height() ?? el.height);
+      return [{ x: -p, y: -p, width: el.width + 2 * p, height: h + 2 * p }];
+    }
     const lines = node?.textArr ?? [];
     return backgroundLineBoxes({
       lineWidths: lines.map((l) => l.width),
@@ -253,8 +272,9 @@ function TextNode({
   const drawBoxes = (ctx: Konva.Context, shape: Konva.Shape) => {
     ctx.beginPath();
     // one path, filled once: overlapping line boxes do not darken each other
-    for (const box of backgroundBoxes()) roundRectPath(ctx, box, background?.cornerRadius ?? 0);
-    ctx.fillShape(shape);
+    for (const box of backgroundBoxes()) roundRectPath(ctx, box, boxRadius);
+    // fill (the background) and/or stroke (its border), from the shape's own attributes
+    ctx.fillStrokeShape(shape);
   };
 
   // The shadow is cast by the box when there is one (like Polotno), else by the letters.
@@ -286,11 +306,13 @@ function TextNode({
       onDblClick={onStartEditing}
       onDblTap={onStartEditing}
     >
-      {background && (
+      {(background || border) && (
         <Shape
-          fill={background.color}
-          opacity={background.opacity}
-          {...shadowProps(shadow)}
+          // the background's own opacity is in its fill colour, so the border stays solid
+          fill={background ? withAlpha(background.color, background.opacity) : undefined}
+          stroke={border?.color}
+          strokeWidth={border?.width ?? 0}
+          {...shadowProps(background ? shadow : null)}
           perfectDrawEnabled={false}
           sceneFunc={drawBoxes}
           hitFunc={drawBoxes}
