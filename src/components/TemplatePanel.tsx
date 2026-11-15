@@ -10,12 +10,19 @@ import {
   listUserTemplates,
   removeUserTemplate,
   saveUserTemplate,
+  templatesForUser,
   templateUrl,
   type TemplateIndexEntry,
   type UserTemplate,
 } from "@/lib/templateLibrary";
 import { PROJECT_FILE_ACCEPT } from "@/lib/fileFlow";
 import TemplateThumbnail from "./TemplateThumbnail";
+import { useSessionStore } from "@/store/useSessionStore";
+import { branchName, canUseTemplate } from "@/lib/auth";
+
+/** The badge of a template's owner: "Global" or the branch's name. */
+const scopeLabel = (branchId: string | undefined): string =>
+  branchId === undefined || branchId === "global" ? "Global" : branchName(branchId);
 
 // ---------------------------------------------------------------------------
 // The Template tab (v11).
@@ -63,6 +70,7 @@ function UserTemplateCard({
           <span className="template-card__badges">
             {pages.length > 1 && <span className="template-card__badge template-card__badge--pages">{pages.length} hal.</span>}
             <span className="template-card__badge">Milik saya</span>
+            {template.branchId && <span className="template-card__badge">{scopeLabel(template.branchId)}</span>}
           </span>
         </span>
       </button>
@@ -81,10 +89,14 @@ function UserTemplateCard({
 }
 
 export default function TemplatePanel() {
+  const user = useSessionStore((s) => s.user);
   const loadFromJSON = useEditorStore((s) => s.loadFromJSON);
   const exportToJSON = useEditorStore((s) => s.exportToJSON);
   const [gallery, setGallery] = useState<GalleryState>({ status: "loading" });
-  const [mine, setMine] = useState<UserTemplate[]>([]);
+  const [allMine, setMine] = useState<UserTemplate[]>([]);
+  // Branch isolation (v12): only global templates and the account's own
+  // branch's (head office sees all), in the gallery and in "my templates".
+  const mine = useMemo(() => templatesForUser(allMine, user), [allMine, user]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -120,6 +132,11 @@ export default function TemplatePanel() {
   );
 
   async function openFromGallery(entry: TemplateIndexEntry) {
+    // the card is not shown to another branch; this guards a stale list too
+    if (!canUseTemplate(user, entry.branchId)) {
+      setStatus(`Template "${entry.name}" milik ${scopeLabel(entry.branchId)} dan tidak tersedia untuk akun ini.`);
+      return;
+    }
     setBusyId(entry.id);
     setStatus(`Mengunduh "${entry.name}"…`);
     setWarnings([]);
@@ -143,6 +160,7 @@ export default function TemplatePanel() {
         name: saveName || `Desain ${new Date().toLocaleString("id-ID")}`,
         data,
         pages,
+        ...(user ? { branchId: user.branchId, ownerId: user.id } : {}),
       });
       if (saved.ok) {
         setMine(listUserTemplates(browserStorage()));
@@ -173,6 +191,7 @@ export default function TemplatePanel() {
       name: file.name.replace(/\.(polotno\.)?json$/i, ""),
       data: convertKusukaToPolotno(parsed.document),
       pages: parsed.document.pages.length,
+      ...(user ? { branchId: user.branchId, ownerId: user.id } : {}),
     });
     if (saved.ok) {
       setMine(listUserTemplates(browserStorage()));
@@ -217,7 +236,10 @@ export default function TemplatePanel() {
         </button>
         <input ref={uploadRef} type="file" accept={PROJECT_FILE_ACCEPT} style={{ display: "none" }} onChange={uploadTemplate} />
         {mine.length === 0 ? (
-          <p className="hint hint--tight">Belum ada. Template disimpan di browser ini saja (localStorage).</p>
+          <p className="hint hint--tight">
+            Belum ada. Template disimpan di browser ini saja (localStorage) dan hanya terlihat oleh akun
+            {user ? ` ${branchName(user.branchId)}` : " cabang yang sama"}.
+          </p>
         ) : (
           <div className="template-grid">
             {mine.map((t) => (
@@ -237,9 +259,16 @@ export default function TemplatePanel() {
         <h3 className="template-section__title">Galeri</h3>
         {gallery.status === "loading" && <p className="hint hint--tight">Memuat katalog template…</p>}
         {gallery.status === "error" && <p className="error-note">{gallery.message}</p>}
+        {gallery.status === "ready" && user && (
+          <p className="hint hint--tight" data-template-scope={user.branchId}>
+            {user.branchId === "pusat"
+              ? "Kantor Pusat: semua template (global dan setiap cabang)."
+              : `Template global dan ${branchName(user.branchId)}.`}
+          </p>
+        )}
         {gallery.status === "ready" && (
           <div className="template-grid">
-            {gallery.templates.map((t) => (
+            {templatesForUser(gallery.templates, user).map((t) => (
               <button
                 key={t.id}
                 type="button"
@@ -249,6 +278,7 @@ export default function TemplatePanel() {
                 title={`Pakai template ${t.name}`}
                 data-template-id={t.id}
                 data-template-pages={t.pages ?? 1}
+                data-template-branch={t.branchId ?? "global"}
               >
                 <span className={`template-card__thumb${(t.pages ?? 1) > 1 ? " template-card__thumb--stack" : ""}`}>
                   <span className="template-card__sheet">
@@ -266,8 +296,8 @@ export default function TemplatePanel() {
                         {t.pages} hal.
                       </span>
                     )}
-                    <span className="template-card__badge" title="Format berkas di public/templates">
-                      Polotno
+                    <span className="template-card__badge" title="Pemilik template">
+                      {scopeLabel(t.branchId)}
                     </span>
                   </span>
                 </span>

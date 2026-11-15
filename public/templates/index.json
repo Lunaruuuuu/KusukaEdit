@@ -9,7 +9,8 @@
       "thumbnail": "thumbs/presentasi-3-slide.svg",
       "pages": 3,
       "width": 1280,
-      "height": 720
+      "height": 720,
+      "branchId": "global"
     },
     {
       "id": "brosur-2-halaman",
@@ -19,7 +20,8 @@
       "thumbnail": "thumbs/brosur-2-halaman.svg",
       "pages": 2,
       "width": 794,
-      "height": 1123
+      "height": 1123,
+      "branchId": "global"
     },
     {
       "id": "carousel-4-slide",
@@ -29,7 +31,8 @@
       "thumbnail": "thumbs/carousel-4-slide.svg",
       "pages": 4,
       "width": 1080,
-      "height": 1080
+      "height": 1080,
+      "branchId": "cabang-1"
     },
     {
       "id": "kartu-nama-2-sisi",
@@ -39,7 +42,8 @@
       "thumbnail": "thumbs/kartu-nama-2-sisi.svg",
       "pages": 2,
       "width": 1050,
-      "height": 600
+      "height": 600,
+      "branchId": "global"
     },
     {
       "id": "undangan-story-3",
@@ -49,7 +53,8 @@
       "thumbnail": "thumbs/undangan-story-3.svg",
       "pages": 3,
       "width": 1080,
-      "height": 1920
+      "height": 1920,
+      "branchId": "cabang-2"
     },
     {
       "id": "katalog-produk-2-halaman",
@@ -59,7 +64,8 @@
       "thumbnail": "thumbs/katalog-produk-2-halaman.svg",
       "pages": 2,
       "width": 1080,
-      "height": 1080
+      "height": 1080,
+      "branchId": "global"
     },
     {
       "id": "paket-feed-dan-story",
@@ -69,7 +75,8 @@
       "thumbnail": "thumbs/paket-feed-dan-story.svg",
       "pages": 2,
       "width": 1080,
-      "height": 1080
+      "height": 1080,
+      "branchId": "cabang-2"
     },
     {
       "id": "promo-diskon",
@@ -79,7 +86,8 @@
       "thumbnail": "thumbs/promo-diskon.svg",
       "pages": 1,
       "width": 900,
-      "height": 600
+      "height": 600,
+      "branchId": "cabang-1"
     },
     {
       "id": "post-sosmed",
@@ -89,7 +97,8 @@
       "thumbnail": "thumbs/post-sosmed.svg",
       "pages": 1,
       "width": 600,
-      "height": 600
+      "height": 600,
+      "branchId": "cabang-1"
     },
     {
       "id": "poster-acara",
@@ -99,7 +108,8 @@
       "thumbnail": "thumbs/poster-acara.svg",
       "pages": 1,
       "width": 900,
-      "height": 600
+      "height": 600,
+      "branchId": "cabang-2"
     },
     {
       "id": "kartu-kutipan",
@@ -109,7 +119,8 @@
       "thumbnail": "thumbs/kartu-kutipan.svg",
       "pages": 1,
       "width": 900,
-      "height": 600
+      "height": 600,
+      "branchId": "pusat"
     }
   ]
 }

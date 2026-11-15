@@ -4,8 +4,13 @@ Prototipe / MVP komponen design editor kanvas untuk Next.js, terinspirasi dari
 arsitektur [Polotno](https://polotno.com/). Dibangun dengan **React-Konva**
 untuk rendering kanvas, dan **Zustand** untuk state management.
 
-Status: **MVP kerja praktek, versi 11** (paket `0.11.0`, rilis "KusukaEdit Ver 0.9") — versi
-ini menambahkan:
+Status: **MVP kerja praktek, versi 12** (paket `0.12.0`, rilis "KusukaEdit Ver 0.10") — versi
+ini menambahkan **halaman login** dengan sesi ringan (Zustand + localStorage, tanpa database),
+**akun per cabang** (Kantor Pusat, Cabang 1, Cabang 2), dan **isolasi template per cabang** di
+tab Template. Header kini tanpa subjudul, dan "Template saya" disusun vertikal penuh. Lihat
+[Login, akun cabang & isolasi template](#login-akun-cabang--isolasi-template-v12).
+
+Versi 11 (rilis "Ver 0.9") menambahkan:
 
 - **pustaka template** di `public/templates/` (katalog `index.json`, thumbnail SVG, berkas
   Polotno yang diunduh saat dipilih), plus **Template saya** untuk menyimpan dan mengunggah
@@ -71,6 +76,7 @@ auto-fit teks; skema JSON native v4.
 - [Skema JSON native (v6)](#skema-dokumen-json-native-v6)
 - [Adapter Polotno (dua arah, semua halaman)](#adapter-polotno-import--export-dua-arah)
 - [Template (pustaka public/templates)](#template-pustaka-publictemplates)
+- [Login, akun cabang & isolasi template (v12)](#login-akun-cabang--isolasi-template-v12)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Docker](#containerization-docker)
 - [Pembaruan keamanan dependensi (v11)](#pembaruan-keamanan-dependensi-v11)
@@ -189,7 +195,11 @@ auto-fit teks; skema JSON native v4.
 - [x] **Pemuat font Google** (v10): font dimuat lewat `<link>` + `document.fonts.load()`
       sebelum teks diukur ulang; pemilih font berisi 20 keluarga
 - [x] **Ikon perataan tiga garis** (v10) untuk semua opsi perataan
-- [x] **Test suite** (`npm test`, 277 tes) untuk adapter, store dan halaman, memori
+- [x] **Login & sesi ringan** (v12): halaman `/login`, registry akun tiruan dengan hash
+      bergaram, sesi 12 jam di localStorage lewat Zustand, tombol Keluar di header
+- [x] **Cabang & isolasi template** (v12): akun Pusat / Cabang 1 / Cabang 2; galeri dan
+      Template saya hanya menampilkan template global + cabang sendiri (Pusat: semua)
+- [x] **Test suite** (`npm test`, 285 tes) untuk adapter, store dan halaman, memori
       gambar, ukuran kanvas, zoom, export, ZIP, template, crop, drop, filter, efek gambar,
       efek lintas elemen, opsi teks, auto-fit, marquee, seleksi ganda, dan efek v10
 
@@ -199,10 +209,11 @@ auto-fit teks; skema JSON native v4.
 canvas-editor/
 ├── app/
 │   ├── layout.tsx                 # Root layout (Server Component)
-│   ├── page.tsx                   # Halaman utama, merender <EditorRoot />
+│   ├── page.tsx                   # Halaman utama: <AuthGate><EditorRoot /></AuthGate>
+│   ├── login/page.tsx             # v12: halaman masuk (/login)
 │   └── globals.css
 ├── public/templates/              # v11: pustaka template (disajikan statis)
-│   ├── index.json                 # Katalog: id, nama, deskripsi, berkas, thumbnail, halaman, ukuran
+│   ├── index.json                 # Katalog: id, nama, deskripsi, berkas, thumbnail, halaman, ukuran, branchId (v12)
 │   ├── *.polotno.json             # 11 dokumen format Polotno
 │   └── thumbs/*.svg               # Pratinjau halaman pertama (dibuat oleh npm run templates:build)
 ├── scripts/
@@ -211,6 +222,7 @@ canvas-editor/
 │   ├── types/editor.ts            # Skema TypeScript: Page, CanvasDocument (native v6), elemen
 │   ├── store/
 │   │   ├── useEditorStore.ts      # Zustand: pages + currentPageIndex, history, clipboard, actions, JSON
+│   │   ├── useSessionStore.ts     # v12: Zustand sesi (restore / login / logout)
 │   │   └── selectors.ts           # selectCurrentPage / selectCanvas / selectElements / selectElementById
 │   ├── lib/
 │   │   ├── pages.ts               # Operasi halaman murni: halaman kosong, duplikat (id baru), indeks, kolektor
@@ -249,6 +261,9 @@ canvas-editor/
 │   │   └── zipStore.ts            # Penulis ZIP tanpa kompresi (CRC32, UTF-8) — tanpa dependensi
 │   └── components/
 │       ├── EditorRoot.tsx         # Wrapper client + dynamic import (ssr:false); susunan toolbar, panel gaya, kanvas, strip halaman
+│       ├── AuthGate.tsx           # v12: hanya untuk pengguna yang masuk; lainnya ke /login
+│       ├── LoginPage.tsx          # v12: formulir masuk
+│       ├── UserMenu.tsx           # v12: nama + cabang di header, tombol Keluar
 │       ├── CanvasWorkspace.tsx    # Stage/Layer/Transformer (banyak node) + marquee + skala tampilan + keyboard shortcut + drag-and-drop + penutup progres export
 │       ├── ZoomControls.tsx       # Tombol −, %, +, Fit di sudut kanvas
 │       ├── ElementRenderer.tsx    # Render 1 elemen (Text/Rect/Ellipse/Shape gambar + filter, blur, bayangan, garis tepi, mask, sudut)
@@ -278,6 +293,7 @@ canvas-editor/
 │   ├── ui-flow.test.ts            # Pratinjau impor, pilihan ekspor, skala gambar di crop (6 tes)
 │   ├── v5-effects-text.test.ts    # Efek v10: dash, latar teks, teks lengkung, font (13 tes)
 │   ├── v6-library-lossless.test.ts # v11: pustaka template, preset efek teks, pulang-pergi Polotno identik (11 tes)
+│   ├── v7-auth-branch.test.ts     # v12: login, sesi, cabang, isolasi template (8 tes)
 │   ├── helpers.ts                 # E(), C(), onePage(), mkPage(): jalan pintas untuk dokumen berhalaman
 │   ├── harness.ts                 # Test runner kecil (tanpa dependensi)
 │   ├── stubs/                     # Pengganti tipis zustand & uuid agar jalan di Node
@@ -2241,6 +2257,88 @@ dan lewat berkas native.
 
 ---
 
+## Login, akun cabang & isolasi template (v12)
+
+Editor kini hanya terbuka untuk pengguna yang sudah masuk. Semuanya berjalan di browser,
+**tanpa database dan tanpa server autentikasi**.
+
+### Akun demo
+
+Registry pengguna tiruan ada di `src/lib/auth.ts` (`USERS`):
+
+| Nama pengguna | Kata sandi | Cabang | Peran |
+|---|---|---|---|
+| `admin.pusat` | `demo-pusat-2026` | Kantor Pusat (`pusat`) | admin |
+| `desainer.cabang1` | `demo-cabang1-2026` | Cabang 1 (`cabang-1`) | desainer |
+| `desainer.cabang2` | `demo-cabang2-2026` | Cabang 2 (`cabang-2`) | desainer |
+
+Kata sandi tidak disimpan apa adanya. Yang disimpan adalah garam acak per akun dan
+`sha256(garam + ":" + kata sandi)`. Untuk menambah akun, buat hash dengan `hashPassword()`
+lalu tambahkan entrinya di `USERS`. Cabang tersedia di `BRANCHES` (`pusat`, `cabang-1`,
+`cabang-2`).
+
+### Alur
+
+- `/` dibungkus `AuthGate`. Tanpa sesi yang berlaku, pengguna dialihkan ke **`/login`**
+  (`app/login/page.tsx` → `LoginPage.tsx`).
+- `/login` memeriksa nama pengguna (tanpa peduli huruf besar/kecil) dan kata sandi dengan
+  `verifyCredentials()`. Pesan salahnya selalu sama, "Nama pengguna atau kata sandi salah",
+  apa pun yang salah. Akun yang belum terdaftar tetap di-hash supaya waktu tunggunya sama.
+- **Sesi** (`useSessionStore`, Zustand):
+  - Yang disimpan di localStorage (`kusukaedit.session`) hanya `userId` dan `expiresAt`,
+    berlaku **12 jam**.
+  - Profil, termasuk **cabang**, selalu diambil ulang dari registry. Field `branchId` yang
+    disisipkan ke data sesi diabaikan (diuji).
+  - Sesi kedaluwarsa atau rusak berarti dianggap keluar.
+- **Header** menampilkan nama dan cabang pengguna serta tombol **Keluar**. Keluar menghapus
+  sesi lalu **memuat ulang halaman penuh** ke `/login`. Desain dan riwayat undo yang ada di
+  memori ikut terbuang, jadi tidak terbawa ke akun berikutnya di browser yang sama.
+
+### Isolasi template per cabang
+
+Setiap entri `public/templates/index.json` punya `branchId`:
+
+| Pemilik | Template |
+|---|---|
+| `global` | Presentasi 3 slide, Brosur 2 halaman, Kartu nama, Katalog produk |
+| `cabang-1` | Carousel Instagram, Promo diskon, Post media sosial |
+| `cabang-2` | Undangan story, Paket feed + story, Poster acara |
+| `pusat` | Kartu kutipan |
+
+Aturannya ada di `canUseTemplate()` / `templatesForUser()`:
+
+- template **global** terlihat oleh semua akun;
+- template **cabang** hanya terlihat oleh cabang itu;
+- **Kantor Pusat melihat semuanya** (global + setiap cabang).
+
+| Akun | Galeri yang terlihat |
+|---|---|
+| Cabang 1 | 4 global + 3 Cabang 1 = 7 |
+| Cabang 2 | 4 global + 3 Cabang 2 = 7 |
+| Pusat | 11 |
+
+**Template saya** mengikuti aturan yang sama. Template yang disimpan atau diunggah membawa
+`branchId` dan `ownerId` akun yang menyimpannya. Template yang disimpan sebelum ada login
+(tanpa `branchId`) dianggap global. Membuka template galeri juga diperiksa ulang dengan
+`canUseTemplate()`.
+
+### Batasan keamanan (penting)
+
+Ini **gerbang akses untuk prototipe, bukan keamanan sungguhan**:
+
+- Registry (termasuk hash), pemeriksaan kata sandi, dan penyaringan template semuanya
+  berjalan di browser. Siapa pun yang membaca bundel JavaScript bisa melihatnya.
+- Semua berkas di `public/templates/` tetap bisa diunduh langsung lewat URL-nya oleh siapa
+  saja, termasuk tanpa login. Isolasi hanya ada di antarmuka.
+- Sesi di localStorage bisa diubah oleh pengguna browser itu, misalnya mengganti `userId`
+  ke akun lain.
+- `crypto.subtle` hanya tersedia di *secure context* (HTTPS atau `localhost`). Lewat HTTP ke
+  alamat IP, login akan gagal.
+
+Untuk perlindungan sungguhan dibutuhkan server: penyedia autentikasi, cookie `httpOnly`
+bertanda tangan, dan template yang disajikan per cabang lewat Route Handler yang memeriksa
+sesi.
+
 ## Template (pustaka `public/templates`)
 
 Sejak v11 template **tidak lagi di-*bundle*** ke JavaScript. Template adalah berkas statis
@@ -2253,19 +2351,22 @@ public/templates/
 └── thumbs/<id>.svg                  # pratinjau halaman pertama
 ```
 
-| Template | Halaman | Ukuran |
-|---|---|---|
-| Presentasi 3 slide | 3 | 1280×720 |
-| Brosur 2 halaman | 2 | 794×1123 (A4) |
-| Carousel Instagram | 4 | 1080×1080 |
-| Kartu nama | 2 | 1050×600 |
-| Undangan story | 3 | 1080×1920 (gambar bermask lingkaran + garis + bayangan) |
-| Katalog produk | 2 | 1080×1080 (kecerahan, sepia, hitam-putih, kontras+saturasi, blur, sudut membulat, mask) |
-| Paket feed + story | 2 | **1080×1080 dan 1080×1920** dalam satu berkas |
-| Promo diskon | 1 | 900×600 |
-| Post media sosial | 1 | 600×600 |
-| Poster acara | 1 | 900×600 |
-| Kartu kutipan | 1 | 900×600 |
+| Template | Halaman | Ukuran | Pemilik (v12) |
+|---|---|---|---|
+| Presentasi 3 slide | 3 | 1280×720 | global |
+| Brosur 2 halaman | 2 | 794×1123 (A4) | global |
+| Carousel Instagram | 4 | 1080×1080 | Cabang 1 |
+| Kartu nama | 2 | 1050×600 | global |
+| Undangan story | 3 | 1080×1920 (gambar bermask lingkaran + garis + bayangan) | Cabang 2 |
+| Katalog produk | 2 | 1080×1080 (kecerahan, sepia, hitam-putih, kontras+saturasi, blur, sudut membulat, mask) | global |
+| Paket feed + story | 2 | **1080×1080 dan 1080×1920** dalam satu berkas | Cabang 2 |
+| Promo diskon | 1 | 900×600 | Cabang 1 |
+| Post media sosial | 1 | 600×600 | Cabang 1 |
+| Poster acara | 1 | 900×600 | Cabang 2 |
+| Kartu kutipan | 1 | 900×600 | Pusat |
+
+Kolom **Pemilik** adalah `branchId` di `index.json`. Siapa melihat apa: lihat
+[Isolasi template per cabang](#isolasi-template-per-cabang).
 
 Semuanya berformat **Polotno**. Dua template yang dulu native (Poster acara, Kartu kutipan)
 dikonversi sekali dengan `convertKusukaToPolotno()`. Semua template dimuat **tanpa
@@ -2435,7 +2536,7 @@ npm install
 npm test
 ```
 
-`npm test` menjalankan **sebelas berkas** di `tests/` lewat [`tsx`](https://tsx.is/)
+`npm test` menjalankan **dua belas berkas** di `tests/` lewat [`tsx`](https://tsx.is/)
 (devDependency), **tanpa browser dan tanpa Next.js** — butuh Node 20+ (memakai
 `Blob`, `URL.createObjectURL`, dan `fetch(blob:)` bawaan Node; diuji pada Node 22). Zustand dan uuid
 diganti stub tipis di `tests/stubs/` lewat `tests/tsconfig.json`, dengan kontrak
@@ -2458,7 +2559,9 @@ diganti stub tipis di `tests/stubs/` lewat `tests/tsconfig.json`, dengan kontrak
 
 | `tests/v6-library-lossless.test.ts` | **v11**: `parseTemplateIndex` (entri rusak/kembar/path tidak aman dibuang), `fetchTemplateIndex`/`fetchTemplateDocument` dengan fetch palsu (sukses, 404, jaringan putus), Template saya dengan storage palsu (urutan terbaru, hapus, data rusak, thumbnail berbahaya dibuang, kuota penuh, tanpa storage); **preset efek teks** (8 preset dikenali kembali, ganti preset tanpa sisa, ukuran ikut font, pendar = warna teks, garis tepi kontras, Latar tetap Latar saat diatur), preset = satu langkah undo; `resolveTextBorder`; **pulang-pergi Polotno identik** (`deepEqual` dengan berkas asli), suntingan menang atas salinan, lewat berkas native, berkas buatan editor tidak menyimpan apa-apa, lewat store (`documentPolotno`, direset oleh Desain baru) | 11 |
 
-Total **277 tes** (22 + 28 + 28 + 41 + 35 + 37 + 33 + 23 + 6 + 13 + 11); semuanya lulus pada saat README
+| `tests/v7-auth-branch.test.ts` | **v12**: registry (satu akun per cabang, hash 64 hex), **masuk** dengan setiap kata sandi demo, profil tanpa hash, nama pengguna tidak peka huruf besar, kata sandi salah / akun tak dikenal / kosong (pesan sama), kata sandi akun lain ditolak; **sesi** (hanya `userId` + `expiresAt`, `branchId` sisipan diabaikan, kedaluwarsa dihapus, data rusak, tanpa storage); store sesi (gagal, berhasil, keluar); **aturan akses** dan **katalog nyata**: Cabang 1 dan Cabang 2 tidak pernah melihat template satu sama lain, Pusat melihat semua, tanpa login tidak ada; Template saya tersaring sama; `branchId` tidak valid dibuang | 8 |
+
+Total **285 tes** (22 + 28 + 28 + 41 + 35 + 37 + 33 + 23 + 6 + 13 + 11 + 8); semuanya lulus pada saat README
 ini ditulis (Node 24 di container `node:24-slim`, karena mesin pengembangan v8 tidak punya
 Node terpasang). `npx tsc --noEmit` juga bersih.
 
@@ -2468,6 +2571,34 @@ folder `node_modules/` di proyek tidak disentuh):
 ```bash
 docker run --rm -v "$PWD:/app" -v kusuka_nm:/app/node_modules -w /app node:24-slim sh -c "npm install && npm test && npx tsc --noEmit"
 ```
+
+### Diuji di browser dengan Konva asli (v12)
+
+`next dev` Next 14.2.35 di `node:20-alpine` (port 3001), Chromium:
+
+- `/` tanpa sesi → dialihkan ke **`/login`** (judul "Masuk · Canvas Design Editor").
+  Kata sandi salah → "Nama pengguna atau kata sandi salah."
+- **Cabang 1** masuk:
+  - Kembali ke `/`. Header berbunyi "Canvas Design Editor … Desainer Cabang 1 · Cabang 1 ·
+    Keluar", tanpa subjudul.
+  - Sesi berisi `userId` + `expiresAt` saja.
+  - Tab Template: "Template global dan Cabang 1." dengan **7 kartu** (4 global + carousel,
+    promo diskon, post sosmed).
+  - "Template saya": kolom nama di atas tombol "Simpan desain ini", keduanya selebar
+    panel; teks tombol unggah terbungkus, tidak terpotong.
+  - Template disimpan sebagai `cabang-1`.
+- **Keluar** → `/login`, sesi terhapus.
+- **Cabang 2** masuk:
+  - **7 kartu** (4 global + undangan, paket feed, poster acara); template simpanan
+    Cabang 1 **tidak terlihat**.
+  - Template Cabang 2 dibuka, lalu Keluar.
+- **Pusat** masuk:
+  - Kanvas kosong, "Halaman 1 / 1", dan Undo nonaktif: desain akun sebelumnya tidak
+    terbawa.
+  - **11 kartu**, dan template simpanan Cabang 1 terlihat berlencana "Cabang 1".
+- `docker build .` berhasil dengan rute `/`, `/login`, `/_not-found`. Image menjawab
+  HTTP 200 untuk `/` dan `/login`.
+- Tidak ada galat di konsol atau log server.
 
 ### Diuji di browser dengan Konva asli (v11)
 
@@ -2678,6 +2809,16 @@ dibaca dari halaman aktif.
 
 ### Belum diuji
 
+- **v12:**
+  1. Login hanya menahan akses di antarmuka. Lihat
+     [Batasan keamanan](#batasan-keamanan-penting): berkas template bisa diunduh langsung
+     lewat URL, dan sesi bisa diubah di browser. Belum ada perlindungan di server.
+  2. Belum dicoba lewat HTTP biasa ke alamat IP (bukan `localhost`/HTTPS). Di sana
+     `crypto.subtle` tidak tersedia dan login akan gagal. Railway/Render memakai HTTPS.
+  3. Sesi berlaku per browser (localStorage); tidak ada sinkronisasi antar-tab saat keluar.
+     Tab lain baru sadar sesinya habis saat dimuat ulang.
+  4. Belum ada halaman kelola akun (tambah/ganti kata sandi). Akun diubah di
+     `src/lib/auth.ts`.
 - **v11:**
   1. Build otomatis di **Railway/Render belum dilihat**. Yang diuji hanya `docker build`
      lokal dengan `Dockerfile` yang sama. `npm audit` masih melaporkan `next` 14 (lihat

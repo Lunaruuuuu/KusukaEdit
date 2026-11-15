@@ -8,6 +8,7 @@ import ImageStylePanel from "./ImageStylePanel";
 import PageStrip from "./PageStrip";
 import HistoryControls from "./HistoryControls";
 import ExportMenu from "./ExportMenu";
+import UserMenu from "./UserMenu";
 import { useEditorStore } from "@/store/useEditorStore";
 
 // react-konva touches `document`/`window` and draws on an HTML <canvas>,
@@ -34,10 +35,10 @@ export default function EditorRoot() {
     <div className={`editor-shell${exporting ? " is-exporting" : ""}`}>
       <header className="editor-header">
         <h1>Canvas Design Editor</h1>
-        <span className="editor-header__subtitle">Polotno-style prototype</span>
         <div className="editor-header__spacer" />
         <HistoryControls />
         <ExportMenu />
+        <UserMenu />
       </header>
 
       <div className="editor-body">

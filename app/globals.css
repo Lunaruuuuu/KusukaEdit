@@ -2030,12 +2030,15 @@ input:focus-visible {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+/* v12: name field above the button, both full width (no squeezed button). */
 .template-save {
   display: flex;
+  flex-direction: column;
   gap: 6px;
 }
 .template-save input {
-  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
   min-width: 0;
   padding: 7px 8px;
   font-size: 12px;
@@ -2046,14 +2049,29 @@ input:focus-visible {
 }
 .template-save button,
 .template-upload {
-  padding: 7px 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
   font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
   color: var(--text-primary);
   background: var(--bg-panel-raised);
   border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
-  white-space: nowrap;
+  /* the label may wrap in a narrow drawer instead of being cut off */
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.template-save button {
+  font-weight: 600;
+  color: #0b0d12;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.template-save button:not(:disabled):hover {
+  background: var(--accent-hover);
 }
 .template-save button:not(:disabled):hover,
 .template-upload:hover {
@@ -2096,4 +2114,131 @@ input:focus-visible {
 .template-card__remove:hover {
   color: var(--danger);
   border-color: var(--danger);
+}
+
+/* ======================================================================
+   v12: sign-in page, user menu in the header
+   ====================================================================== */
+.auth-screen {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 16px;
+  box-sizing: border-box;
+  background: var(--bg-app, #0f1115);
+}
+.auth-screen__note {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.auth-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(360px, 100%);
+  padding: 24px;
+  box-sizing: border-box;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+.auth-card__title {
+  margin: 0;
+  font-size: 18px;
+}
+.auth-card__lead {
+  margin: -4px 0 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.auth-field input {
+  padding: 9px 10px;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.auth-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.auth-card__error {
+  margin: 0;
+  font-size: 12px;
+  color: #ffb4b4;
+}
+.auth-card__submit {
+  padding: 10px;
+  font-weight: 600;
+  color: #0b0d12;
+  background: var(--accent);
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.auth-card__submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.auth-card__demo {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.auth-card__demo ul {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+.auth-card__demo p {
+  margin: 0;
+}
+.user-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 4px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+.user-menu__who {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  text-align: right;
+}
+.user-menu__name {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.user-menu__branch {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.user-menu__logout {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.user-menu__logout:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+@media (max-width: 760px) {
+  .user-menu__who {
+    display: none;
+  }
 }

@@ -1,7 +1,13 @@
 import EditorRoot from "@/components/EditorRoot";
+import AuthGate from "@/components/AuthGate";
 
-// This page itself can stay a Server Component: EditorRoot is a "use client"
-// component, and it internally lazy-loads the Konva canvas with ssr:false.
+// This page itself can stay a Server Component: AuthGate and EditorRoot are
+// "use client" components. AuthGate sends a visitor without a session to
+// /login; EditorRoot lazy-loads the Konva canvas with ssr:false.
 export default function Home() {
-  return <EditorRoot />;
+  return (
+    <AuthGate>
+      <EditorRoot />
+    </AuthGate>
+  );
 }

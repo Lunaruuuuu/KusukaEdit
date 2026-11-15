@@ -17,6 +17,8 @@
 // all of it runs in plain Node tests.
 // ---------------------------------------------------------------------------
 
+import { canUseTemplate, type UserProfile } from "@/lib/auth";
+
 export const TEMPLATE_BASE_URL = "/templates";
 export const TEMPLATE_INDEX_FILE = "index.json";
 
@@ -31,6 +33,11 @@ export interface TemplateIndexEntry {
   pages?: number;
   width?: number;
   height?: number;
+  /**
+   * Who may use it (v12): "global" / absent = every branch, otherwise one
+   * branch id ("pusat", "cabang-1", "cabang-2"). See canUseTemplate().
+   */
+  branchId?: string;
 }
 
 export interface TemplateIndex {
@@ -73,6 +80,7 @@ export function parseTemplateIndex(data: unknown): { index: TemplateIndex; skipp
       ...(posInt(item.pages) ? { pages: posInt(item.pages) } : {}),
       ...(posInt(item.width) ? { width: posInt(item.width) } : {}),
       ...(posInt(item.height) ? { height: posInt(item.height) } : {}),
+      ...(typeof item.branchId === "string" && /^[a-z0-9-]{1,40}$/.test(item.branchId) ? { branchId: item.branchId } : {}),
     });
   }
   return { index: { version: typeof data.version === "number" ? data.version : 1, templates }, skipped };
@@ -125,6 +133,21 @@ export interface UserTemplate {
   /** data:image/png;base64,... preview of the first page, or absent. */
   thumbnail?: string;
   pages?: number;
+  /** The branch of the account that saved it (v12); absent = saved before sign-in existed (global). */
+  branchId?: string;
+  /** The user id of the account that saved it (v12). */
+  ownerId?: string;
+}
+
+/**
+ * The templates an account may see and use (gallery or "my templates"):
+ * global ones and its own branch's; head office sees all (canUseTemplate).
+ */
+export function templatesForUser<T extends { branchId?: string }>(
+  templates: readonly T[],
+  user: Pick<UserProfile, "branchId"> | null
+): T[] {
+  return templates.filter((t) => canUseTemplate(user, t.branchId));
 }
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
